@@ -1,9 +1,15 @@
+// ChatInterface.jsx
 import { MoreHorizontal, Upload, User, Search, PenSquare, HelpCircle, X } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import mammoth from "mammoth";
+import { Document, Page, pdfjs } from 'react-pdf';
 import ReactCrop, { centerCrop } from 'react-image-crop';
+import 'react-pdf/dist/esm/Page/TextLayer.css';
+import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-image-crop/dist/ReactCrop.css';
+
+// Set up PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
 function centerInitialCrop(mediaWidth, mediaHeight) {
   return centerCrop(
@@ -25,9 +31,12 @@ export default function ChatInterface() {
   const containerRef = useRef(null);
   const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState(null);
-  const [fileContent, setFileContent] = useState("");
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [numPages, setNumPages] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
   const [errorMessage, setErrorMessage] = useState("");
   const [showHelp, setShowHelp] = useState(false);
+  const [loading, setLoading] = useState(false);
   
   // Image cropping states
   const [imgSrc, setImgSrc] = useState('');
@@ -49,25 +58,58 @@ export default function ChatInterface() {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (event) => {
+  const handleFileChange = async (event) => {
     const file = event.target.files[0];
-    if (file) {
-      setSelectedFile(file.name);
-
-      if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          mammoth
-            .convertToHtml({ arrayBuffer: e.target.result })
-            .then((result) => {
-              setFileContent(result.value);
-            })
-            .catch((err) => console.error("Error converting docx:", err));
-        };
-        reader.readAsArrayBuffer(file);
+    if (!file) return;
+  
+    setSelectedFile(file.name);
+    setLoading(true);
+    setErrorMessage("");
+  
+    try {
+      const formData = new FormData();
+      formData.append('docx_file', file);
+  
+      const response = await fetch('http://162.38.3.101:8100/convert/docx-to-pdf', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          // Remove 'Content-Type' header as it will be automatically set with FormData
+        },
+        credentials: 'include', // Include cookies if needed
+        mode: 'cors', // Explicitly state CORS mode
+        body: formData
+      });
+  
+      if (!response.ok) {
+        throw new Error(`Conversion failed: ${response.statusText}`);
       }
+  
+      const pdfBlob = await response.blob();
+      const pdfBlobUrl = URL.createObjectURL(pdfBlob);
+      setPdfUrl(pdfBlobUrl);
+      setPageNumber(1);
+  
+    } catch (error) {
+      console.error('Error converting file:', error);
+      setErrorMessage("文件轉換失敗，請重試");
+    } finally {
+      setLoading(false);
     }
   };
+
+  function onDocumentLoadSuccess({ numPages }) {
+    setNumPages(numPages);
+  }
+
+  // Clean up blob URL when component unmounts
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [pdfUrl]);
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -87,22 +129,16 @@ export default function ChatInterface() {
   };
 
   const handleCropChange = (_, percentCrop) => {
-    // Minimum size in percentage (10% of the image)
     const MIN_SIZE = 10;
-
     let newCrop = { ...percentCrop };
 
-    // Enforce minimum width
     if (percentCrop.width < MIN_SIZE) {
       newCrop.width = MIN_SIZE;
-      // Adjust x position to keep the crop within bounds
       newCrop.x = Math.min(percentCrop.x, 100 - MIN_SIZE);
     }
 
-    // Enforce minimum height
     if (percentCrop.height < MIN_SIZE) {
       newCrop.height = MIN_SIZE;
-      // Adjust y position to keep the crop within bounds
       newCrop.y = Math.min(percentCrop.y, 100 - MIN_SIZE);
     }
 
@@ -116,20 +152,18 @@ export default function ChatInterface() {
 
   const handleWheel = (e) => {
     e.preventDefault();
-    
     const delta = e.deltaY;
     const ZOOM_SPEED = 0.1;
     
     setScale(prevScale => {
       const newScale = delta > 0 
-        ? Math.max(0.1, prevScale - ZOOM_SPEED)  // Zoom out
-        : Math.min(3, prevScale + ZOOM_SPEED);   // Zoom in
+        ? Math.max(0.1, prevScale - ZOOM_SPEED)
+        : Math.min(3, prevScale + ZOOM_SPEED);
       return newScale;
     });
   };
 
   const handleMouseDown = (e) => {
-    // Only allow dragging if right-clicking on the image itself
     if (e.target.tagName === 'IMG') {
       e.preventDefault();
       setIsDragging(true);
@@ -185,7 +219,6 @@ export default function ChatInterface() {
     alert("驗證成功！");
   };
 
-  // Attach event listeners to document only when dragging
   useEffect(() => {
     if (isDragging) {
       document.addEventListener('mousemove', handleMouseMove);
@@ -198,12 +231,12 @@ export default function ChatInterface() {
     }
   }, [isDragging, dragStart]);
 
-  return (
-    <div className="h-screen w-screen flex bg-gray-800 text-white overflow-hidden">
+return (
+    <div className="flex min-h-screen bg-gray-800 text-white overflow-hidden">
       {/* Left sidebar */}
-      <div className="w-52 border-r border-gray-700 flex flex-col overflow-hidden">
+      <div className="w-52 border-r border-gray-700 flex flex-col">
         {/* Top navigation */}
-        <div className="flex-none flex items-center justify-between p-4 border-b border-gray-700">
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <div className="flex items-center gap-2">
             <User className="w-5 h-5" />
             <span>brian</span>
@@ -229,48 +262,84 @@ export default function ChatInterface() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col bg-gray-800 overflow-hidden">
         {/* Upload area */}
-        <div className="flex-1 p-4 flex items-start justify-center gap-4 overflow-hidden">
+        <div className="flex-1 p-8 flex items-center justify-center gap-8">
           {/* Document upload area */}
-          <div className="h-full w-1/2 flex flex-col overflow-hidden">
-            <div 
-              className="flex-1 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden hover:border-gray-500 transition-colors"
-              onClick={handleUploadClick}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                onChange={handleFileChange}
-                accept=".docx"
-              />
-              <div className="h-full overflow-auto p-4">
-                {fileContent ? (
-                  <div
-                    className="text-gray-300"
-                    dangerouslySetInnerHTML={{ __html: fileContent }}
-                  />
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center gap-4">
-                    <Upload className="w-8 h-8 text-gray-400" />
-                    <span className="text-gray-300">上傳文件</span>
+          <div 
+            className="w-full max-w-2xl h-full border-2 border-dashed border-gray-600 rounded-lg flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-gray-500 transition-colors"
+            onClick={handleUploadClick}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".docx"
+            />
+
+            <div className="w-full max-w-2xl mt-2 overflow-auto h-full border-gray-600 rounded-lg p-4">
+              {loading ? (
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                </div>
+              ) : pdfUrl ? (
+                <div className="h-full flex flex-col">
+                  <div className="flex-1 overflow-auto bg-gray-900">
+                    <Document
+                      file={pdfUrl}
+                      onLoadSuccess={onDocumentLoadSuccess}
+                      className="flex flex-col items-center"
+                    >
+                      <Page 
+                        pageNumber={pageNumber}
+                        className="max-w-full"
+                        renderTextLayer={false}
+                        renderAnnotationLayer={false}
+                      />
+                    </Document>
                   </div>
-                )}
-              </div>
+                  {numPages > 1 && (
+                    <div className="p-4 bg-gray-800 border-t border-gray-700 flex justify-center items-center gap-4">
+                      <button
+                        onClick={() => setPageNumber(page => Math.max(1, page - 1))}
+                        disabled={pageNumber <= 1}
+                        className="px-4 py-2 bg-gray-700 rounded-lg disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-gray-300">
+                        Page {pageNumber} of {numPages}
+                      </span>
+                      <button
+                        onClick={() => setPageNumber(page => Math.min(numPages, page + 1))}
+                        disabled={pageNumber >= numPages}
+                        className="px-4 py-2 bg-gray-700 rounded-lg disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="w-full max-w-2xl h-full flex flex-col items-center justify-center gap-4">
+                  <Upload className="w-8 h-8 text-gray-400" />
+                  <span className="text-gray-300">上傳文件</span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Image and results area */}
-          <div className="h-full w-1/2 flex flex-col gap-4 overflow-hidden">
+          {/* Image upload and results area */}
+          <div className="flex-1 flex flex-col gap-8 w-full max-w-2xl h-full">
             {/* Image upload area */}
             <div 
               ref={containerRef}
-              className="h-2/3 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden"
+              className="w-full max-w-2xl h-2/3 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden"
               onContextMenu={(e) => e.preventDefault()}
             >
               {!imgSrc ? (
-                <label className="h-full flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700/10">
+                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700/10">
                   <Upload className="w-8 h-8 text-gray-400" />
                   <span className="text-gray-300 mt-2">上傳影像</span>
                   <input
@@ -350,6 +419,16 @@ export default function ChatInterface() {
                   
                   <div className="p-4 bg-gray-800 border-t border-gray-700">
                     <div className="flex items-center gap-4">
+                      <span className="text-gray-300 whitespace-nowrap">縮放:</span>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="3"
+                        step="0.1"
+                        value={scale}
+                        onChange={handleZoomChange}
+                        className="w-full"
+                      />
                       <span className="text-gray-300 w-12">{scale.toFixed(2)}x</span>
                     </div>
                   </div>
@@ -358,12 +437,11 @@ export default function ChatInterface() {
             </div>
 
             {/* Results area */}
-            <div className="h-1/3 border-2 border-gray-600 rounded-lg flex flex-col items-center justify-center">
+            <div className="w-full max-w-2xl h-1/3 border-2 border-gray-600 rounded-lg flex flex-col items-center justify-center gap-4">
               <span className="text-gray-300">結果</span>
             </div>
           </div>
         </div>
-
 
         {/* Footer */}
         <div className="p-4 bg-gray-800 border-t border-gray-700">

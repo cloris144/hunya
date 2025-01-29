@@ -5,6 +5,7 @@ import './index.css';
 import Root from './routes/root';
 import Login from './routes/login';
 import reportWebVitals from './reportWebVitals';
+import 'react-image-crop/dist/ReactCrop.css';
 import ProtectedRoute from "./routes/ProtectedRoute";   
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

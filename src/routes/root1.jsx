@@ -87,7 +87,7 @@ export default function ChatInterface() {
   };
 
   const handleCropChange = (_, percentCrop) => {
-    // Minimum size in percentage (10% of the image)
+    // Minimum size in percentage (30% of the image)
     const MIN_SIZE = 10;
 
     let newCrop = { ...percentCrop };
@@ -199,11 +199,11 @@ export default function ChatInterface() {
   }, [isDragging, dragStart]);
 
   return (
-    <div className="h-screen w-screen flex bg-gray-800 text-white overflow-hidden">
+    <div className="flex min-h-screen bg-gray-800 text-white overflow-hidden">
       {/* Left sidebar */}
-      <div className="w-52 border-r border-gray-700 flex flex-col overflow-hidden">
+      <div className="w-52 border-r border-gray-700 flex flex-col">
         {/* Top navigation */}
-        <div className="flex-none flex items-center justify-between p-4 border-b border-gray-700">
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <div className="flex items-center gap-2">
             <User className="w-5 h-5" />
             <span>brian</span>
@@ -229,48 +229,47 @@ export default function ChatInterface() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col bg-gray-800 overflow-hidden">
         {/* Upload area */}
-        <div className="flex-1 p-4 flex items-start justify-center gap-4 overflow-hidden">
+        <div className="flex-1 p-8 flex items-center justify-center gap-8">
           {/* Document upload area */}
-          <div className="h-full w-1/2 flex flex-col overflow-hidden">
-            <div 
-              className="flex-1 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden hover:border-gray-500 transition-colors"
-              onClick={handleUploadClick}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                onChange={handleFileChange}
-                accept=".docx"
-              />
-              <div className="h-full overflow-auto p-4">
-                {fileContent ? (
-                  <div
-                    className="text-gray-300"
-                    dangerouslySetInnerHTML={{ __html: fileContent }}
-                  />
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center gap-4">
-                    <Upload className="w-8 h-8 text-gray-400" />
-                    <span className="text-gray-300">上傳文件</span>
-                  </div>
-                )}
-              </div>
+          <div 
+            className="w-full max-w-2xl h-full border-2 border-dashed border-gray-600 rounded-lg flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-gray-500 transition-colors"
+            onClick={handleUploadClick}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".docx"
+            />
+
+            <div className="w-full max-w-2xl mt-2 overflow-auto h-full border-gray-600 rounded-lg p-4">
+              {fileContent ? (
+                <div
+                  className="text-gray-300"
+                  dangerouslySetInnerHTML={{ __html: fileContent }}
+                />
+              ) : (
+                <div className="w-full max-w-2xl h-full flex flex-col items-center justify-center gap-4">
+                  <Upload className="w-8 h-8 text-gray-400" />
+                  <span className="text-gray-300">上傳文件</span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Image and results area */}
-          <div className="h-full w-1/2 flex flex-col gap-4 overflow-hidden">
+          {/* Image upload and results area */}
+          <div className="flex-1 flex flex-col gap-8 w-full max-w-2xl h-full">
             {/* Image upload area */}
             <div 
               ref={containerRef}
-              className="h-2/3 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden"
+              className="w-full max-w-2xl h-2/3 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden"
               onContextMenu={(e) => e.preventDefault()}
             >
               {!imgSrc ? (
-                <label className="h-full flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700/10">
+                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700/10">
                   <Upload className="w-8 h-8 text-gray-400" />
                   <span className="text-gray-300 mt-2">上傳影像</span>
                   <input
@@ -350,6 +349,16 @@ export default function ChatInterface() {
                   
                   <div className="p-4 bg-gray-800 border-t border-gray-700">
                     <div className="flex items-center gap-4">
+                      <span className="text-gray-300 whitespace-nowrap">縮放:</span>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="3"
+                        step="0.1"
+                        value={scale}
+                        onChange={handleZoomChange}
+                        className="w-full"
+                      />
                       <span className="text-gray-300 w-12">{scale.toFixed(2)}x</span>
                     </div>
                   </div>
@@ -358,12 +367,11 @@ export default function ChatInterface() {
             </div>
 
             {/* Results area */}
-            <div className="h-1/3 border-2 border-gray-600 rounded-lg flex flex-col items-center justify-center">
+            <div className="w-full max-w-2xl h-1/3 border-2 border-gray-600 rounded-lg flex flex-col items-center justify-center gap-4">
               <span className="text-gray-300">結果</span>
             </div>
           </div>
         </div>
-
 
         {/* Footer */}
         <div className="p-4 bg-gray-800 border-t border-gray-700">
