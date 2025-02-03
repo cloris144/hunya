@@ -449,39 +449,61 @@ export default function ChatInterface() {
   };
 
   // Helper function to parse OCR scope string
-  const parseOcrScope = (scopeStr) => {
-    try {
-      const [cropX, cropY, cropWidth, cropHeight] = scopeStr
-        .replace(/[\[\]]/g, '')
-        .split(',')
-        .map(val => parseFloat(val.trim()));
+// Helper function to parse OCR scope string
+const parseOcrScope = (scopeStr, imgDimensions) => {
+  try {
+    // Check if the scope is already in percentage format
+    const isPercentageFormat = scopeStr.includes('%');
+    
+    const [cropHeight, cropWidth, cropX, cropY] = scopeStr
+      .replace(/[\[\]%]/g, '')
+      .split(',')
+      .map(val => parseFloat(val.trim()));
 
-      return { cropX, cropY, cropWidth, cropHeight };
-    } catch (error) {
-      console.error('Error parsing OCR scope:', error);
-      return null;
+    // If imgDimensions are provided and it's not in percentage format, convert to percentage
+    if (!isPercentageFormat && imgDimensions) {
+      return {
+        cropX: (cropX / imgDimensions.width) * 100,
+        cropY: (cropY / imgDimensions.height) * 100,
+        cropWidth: (cropWidth / imgDimensions.width) * 100,
+        cropHeight: (cropHeight / imgDimensions.height) * 100
+      };
     }
-  };
 
-  const applyCropFromScope = (scope, imageUrl) => {
-    if (!scope) return;
+    // If already in percentage or no dimensions provided, return as-is
+    return { cropX, cropY, cropWidth, cropHeight };
+  } catch (error) {
+    console.error('Error parsing OCR scope:', error);
+    return null;
+  }
+};
+const serializeCropScope = (crop) => {
+  // Ensure the crop is in percentage format
+  return `[${crop.x.toFixed(2)}%, ${crop.y.toFixed(2)}%, ${crop.width.toFixed(2)}%, ${crop.height.toFixed(2)}%]`;
+};
+const applyCropFromScope = (scope, imageUrl) => {
+  if (!scope) return;
 
+  return new Promise((resolve, reject) => {
     const img = new Image();
-    img.src = imageUrl;
     img.onload = () => {
-      // Convert absolute pixel values to percentages
+      // Ensure the crop is in percentage format
       const percentCrop = {
-        x: (scope.cropX / img.naturalWidth) * 100,
-        y: (scope.cropY / img.naturalHeight) * 100,
-        width: (scope.cropWidth / img.naturalWidth) * 100,
-        height: (scope.cropHeight / img.naturalHeight) * 100,
+        x: scope.cropX,
+        y: scope.cropY,
+        width: scope.cropWidth,
+        height: scope.cropHeight,
         unit: '%'
       };
 
       setCrop(percentCrop);
       setCompletedCrop(percentCrop);
+      resolve(percentCrop);
     };
-  };
+    img.onerror = reject;
+    img.src = imageUrl;
+  });
+};
 
   return (
     <div className="h-screen w-screen flex bg-gray-800 text-white overflow-hidden">
