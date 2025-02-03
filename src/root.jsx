@@ -7,7 +7,6 @@ import VerificationList from './components/VerificationList';
 import VerificationDetails from './components/VerificationDetails';
 import RenameDialog from './components/RenameDialog';
 import UserMenu from './components/UserMenu';
-import useFileManager from './hooks/useFileManager';
 
 // Import pdf.js directly and set up the worker
 import * as pdfjsLib from 'pdfjs-dist';
@@ -28,68 +27,85 @@ function centerInitialCrop(mediaWidth, mediaHeight) {
 }
 
 export default function ChatInterface() {
-  // File management
-  const {
-    selectedFiles,
-    updateDocumentFile,
-    updateImageFile,
-    updateImageScope,
-    clearFile,
-    clearAllFiles,
-    loadExistingFiles
-  } = useFileManager();
-
-  // Refs
   const fileInputRef = useRef(null);
   const imgRef = useRef(null);
+  const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const navigate = useNavigate();
-
-  // Document states
-  const [isPdfAvailable, setIsPdfAvailable] = useState(false);
+  const [username, setUsername] = useState("Loading...");
+  const [docxFile, setDocxFile] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [pdfDocument, setPdfDocument] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [numPages, setNumPages] = useState(null);
-
-  // UI states
-  const [username, setUsername] = useState("Loading...");
   const [errorMessage, setErrorMessage] = useState("");
   const [showHelp, setShowHelp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [isDocDragging, setIsDocDragging] = useState(false);
   const [isImageDragging, setIsImageDragging] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
 
-  // Image states
+  // Image cropping states
   const [imgSrc, setImgSrc] = useState('');
   const [crop, setCrop] = useState();
   const [completedCrop, setCompletedCrop] = useState(null);
   const [selectedVerification, setSelectedVerification] = useState(null);
-  const [savedOcrScope, setSavedOcrScope] = useState(null);
+  const handleVerificationSelect = (verification) => {
+    console.log("Selected verification:", verification); // Debug log
+    setSelectedVerification(verification);
+  };
+  const handleCreateVerification = async (name) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch('http://162.38.2.150:8100/verifications?verification_name=' + encodeURIComponent(name), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-  // Render PDF page when document or page changes
-  useEffect(() => {
-    if (pdfDocument && currentPage) {
-      renderPage(currentPage);
+      if (!response.ok) {
+        throw new Error('Failed to create verification');
+      }
+
+      setIsRenameDialogOpen(false);
+
+      // Find the VerificationList component and call its refresh method
+      const event = new CustomEvent('refreshVerifications');
+      window.dispatchEvent(event);
+
+    } catch (error) {
+      console.error('Error creating verification:', error);
+      setErrorMessage('Failed to create verification');
     }
-  }, [pdfDocument, currentPage]);
+  };
+
 
   // Authentication check
   useEffect(() => {
     const token = localStorage.getItem('access_token');
-    if (!token) navigate('/login');
+    if (!token) {
+      navigate('/login');
+    }
   }, [navigate]);
 
-  // Load user data
+  // Add the new useEffect for fetching user data here 👇
   useEffect(() => {
     const fetchUserData = async () => {
       try {
         const token = localStorage.getItem('access_token');
         const response = await fetch('http://162.38.2.150:8100/users/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         });
-        if (!response.ok) throw new Error('Failed to fetch user data');
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch user data');
+        }
+
         const userData = await response.json();
         setUsername(userData.username);
       } catch (error) {
@@ -97,95 +113,61 @@ export default function ChatInterface() {
         setUsername("Error");
       }
     };
+
     fetchUserData();
   }, []);
 
-  // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      if (pdfDocument) pdfDocument.destroy();
-      if (imgSrc) URL.revokeObjectURL(imgSrc);
-      clearAllFiles();
-    };
-  }, []);
-
-  // Main handlers
-  const handleVerificationSelect = async (verification) => {
-    // Clear states if deselecting verification
-    if (!verification || (selectedVerification && verification.id !== selectedVerification.id)) {
-      clearState();
-      clearAllFiles();
-    }
-
-    // Update selected verification state
-    setSelectedVerification(verification);
-    if (!verification) return;
-
-    try {
-      // Get the authentication token
-      const token = localStorage.getItem('access_token');
-      if (!token) throw new Error('No authentication token found');
-
-      // Fetch verification details
-      const response = await fetch(`http://162.38.2.150:8100/verifications/${verification.id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch verification details');
-      const data = await response.json();
-
-      // Handle document files (DOCX/PDF)
-      if (data.docx_info?.exists || data.pdf_info?.exists) {
-        await loadDocumentFiles(verification.id, data, token);
-      }
-
-      // Handle image file
-      if (data.image_info?.exists) {
-        await loadImageFile(verification.id, data.image_info, token);
-      }
-
-    } catch (error) {
-      console.error('Error in handleVerificationSelect:', error);
-      setErrorMessage('Failed to load verification data');
-    }
+  // Drag and drop handlers
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
   };
 
-  const handleCreateVerification = async (name) => {
-    try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch('http://162.38.2.150:8100/verifications?verification_name=' + encodeURIComponent(name), {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!response.ok) throw new Error('Failed to create verification');
-
-      const newVerification = await response.json();
-      setIsRenameDialogOpen(false);
-
-      window.dispatchEvent(new CustomEvent('refreshVerifications'));
-
-      if (newVerification) {
-        handleVerificationSelect({
-          id: newVerification.id,
-          verification_name: newVerification.verification_name,
-          status: newVerification.status,
-          created_at: newVerification.created_at
-        });
-      }
-    } catch (error) {
-      console.error('Error creating verification:', error);
-      setErrorMessage('Failed to create verification');
-    }
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
   };
 
-  // Document handlers
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+
+    if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      handleDocxFile(file);
+    } else {
+      setErrorMessage("請上傳 DOCX 格式的文件");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+  const handleDocDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDocDragging(true);
+  };
+  const handleDocDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDocDragging(false);
+  };
   const handleDocxFile = async (file) => {
     setLoading(true);
     setErrorMessage("");
+    setSelectedFile(file.name);
 
     try {
-      updateDocumentFile(file, file.name, 'docx');
       const formData = new FormData();
       formData.append('file', file);
 
@@ -194,16 +176,12 @@ export default function ChatInterface() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error('PDF conversion failed');
+      if (!response.ok) {
+        throw new Error('PDF conversion failed');
+      }
 
       const pdfData = await response.arrayBuffer();
-      const pdfBlob = new Blob([pdfData], { type: 'application/pdf' });
-      const pdfFile = new File([pdfBlob], 'document.pdf', { type: 'application/pdf' });
 
-      // Update file manager state
-      updateDocumentFile(pdfFile, 'document.pdf', 'pdf');
-
-      // Update UI state
       if (pdfDocument) {
         pdfDocument.destroy();
         setPdfDocument(null);
@@ -215,20 +193,100 @@ export default function ChatInterface() {
       setPdfDocument(pdf);
       setNumPages(pdf.numPages);
       setCurrentPage(1);
-      setSelectedFile(file.name);
 
     } catch (error) {
       console.error('Error converting document:', error);
       setErrorMessage("文件轉換失敗，請稍後再試");
-      clearFile('docx');
-      clearFile('pdf');
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const clearPDF = (e) => {
+    e.stopPropagation();
+
+    if (pdfDocument) {
+      pdfDocument.destroy();
+    }
+    setPdfDocument(null);
+    setNumPages(null);
+    setCurrentPage(1);
+    setSelectedFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    setDocxFile(null);
+  };
+
+  const handleContainerClick = () => {
+    if (!pdfDocument) {
+      handleUploadClick();
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+  const handleDocDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDocDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+
+    if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      setLoading(true);
+      setErrorMessage("");
+      setSelectedFile(file.name);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('http://162.38.3.101:8101/doc_to_pdf', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error('PDF conversion failed');
+        }
+
+        const pdfData = await response.arrayBuffer();
+
+        if (pdfDocument) {
+          pdfDocument.destroy();
+          setPdfDocument(null);
+        }
+
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const pdf = await loadingTask.promise;
+
+        setPdfDocument(pdf);
+        setNumPages(pdf.numPages);
+        setCurrentPage(1);
+
+      } catch (error) {
+        console.error('Error converting document:', error);
+        setErrorMessage("文件轉換失敗，請稍後再試");
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setErrorMessage("請上傳 DOCX 格式的文件");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -237,74 +295,52 @@ export default function ChatInterface() {
       handleDocxFile(file);
     } else {
       setErrorMessage("請上傳 DOCX 格式的文件");
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
+  // Function to render PDF page
   const renderPage = async (pageNum) => {
     if (!pdfDocument || !canvasRef.current) return;
 
     try {
-        const page = await pdfDocument.getPage(pageNum);
-        const canvas = canvasRef.current;
-        const context = canvas.getContext('2d');
+      const page = await pdfDocument.getPage(pageNum);
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
 
-        // Clear previous content
-        context.clearRect(0, 0, canvas.width, canvas.height);
+      const viewport = page.getViewport({ scale: 1.5 });
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
 
-        const viewport = page.getViewport({ scale: 1.5 });
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+      };
 
-        // Cancel any ongoing rendering task before starting a new one
-        if (canvas.renderTask) {
-            canvas.renderTask.cancel();
-        }
-
-        // Start new rendering task and store reference
-        canvas.renderTask = page.render({
-            canvasContext: context,
-            viewport: viewport
-        });
-
-        await canvas.renderTask.promise;
+      await page.render(renderContext).promise;
     } catch (error) {
-        if (error.name !== 'RenderingCancelledException') {
-            console.error('Error rendering PDF page:', error);
-            setErrorMessage('PDF 渲染失敗');
-        }
+      console.error('Error rendering PDF page:', error);
+      setErrorMessage('PDF 渲染失敗');
     }
-};
+  };
 
-
-  // Image handlers
+  // Image handling functions
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    updateImageFile(file, file.name);
-
     const reader = new FileReader();
     reader.addEventListener('load', () => {
-      const imageUrl = reader.result?.toString() || '';
-      setImgSrc(imageUrl);
-
-      const img = new Image();
-      img.src = imageUrl;
-      img.onload = () => {
-        const initialCrop = centerInitialCrop(img.width, img.height);
-        setCrop(initialCrop);
-        setCompletedCrop(null);
-
-        updateImageScope({
-          x: initialCrop.x,
-          y: initialCrop.y,
-          width: initialCrop.width,
-          height: initialCrop.height
-        });
-      };
+      setImgSrc(reader.result?.toString() || '');
     });
     reader.readAsDataURL(file);
+  };
+
+  const onImageLoad = (e) => {
+    const { width, height } = e.currentTarget;
+    setCrop(centerInitialCrop(width, height));
   };
 
   const handleCropChange = (_, percentCrop) => {
@@ -322,167 +358,90 @@ export default function ChatInterface() {
     }
 
     setCrop(newCrop);
-    updateImageScope(newCrop);
   };
 
-  // Helper functions
-  const clearState = () => {
-    if (pdfDocument) pdfDocument.destroy();
-    setPdfDocument(null);
-    setNumPages(null);
-    setCurrentPage(1);
-    setSelectedFile(null);
-    setIsPdfAvailable(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (imgSrc) URL.revokeObjectURL(imgSrc);
+  const clearImage = () => {
     setImgSrc('');
+    setCrop(undefined);
     setCompletedCrop(null);
-    setCrop(null);
-    setSavedOcrScope(null);
-    setErrorMessage('');
+    setImageFile(null);
   };
 
-  const loadDocumentFiles = async (verificationId, data, token) => {
-    try {
-      // Handle DOCX file first
-      console.log('if docx')
-      console.log(data.docx_info?.exists)
-      if (data.docx_info?.exists) {
-        console.log('exdocx')
-        const docxResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/docx`,
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        );
-
-        if (docxResponse.ok) {
-          const docxBlob = await docxResponse.blob();
-          const docxFile = new File([docxBlob], data.docx_info.filename || 'document.docx', {
-            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          });
-
-          // Update file manager state with DOCX file
-          updateDocumentFile(docxFile, data.docx_info.filename, 'docx');
-          setSelectedFile(data.docx_info.filename);
-
-          // Only convert to PDF if PDF doesn't exist or isn't available
-          if (!data.pdf_info?.exists || !data.pdf_info?.available) {
-            await handleDocxFile(docxFile);
-            return;
-          }
-        }
-      }
-
-      // Handle existing PDF if available
-      if (data.pdf_info?.exists && data.pdf_info?.available) {
-        const pdfResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/pdf`,
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        );
-
-        if (pdfResponse.ok) {
-          const pdfData = await pdfResponse.arrayBuffer();
-
-          // Update PDF state for rendering
-          const loadingTask = pdfjsLib.getDocument({ data: pdfData });
-          const pdf = await loadingTask.promise;
-          setPdfDocument(pdf);
-          setNumPages(pdf.numPages);
-          setCurrentPage(1);
-          setIsPdfAvailable(true);
-
-          // Update file manager state with PDF file
-          const pdfBlob = new Blob([pdfData], { type: 'application/pdf' });
-          const pdfFile = new File([pdfBlob], 'document.pdf', { type: 'application/pdf' });
-          updateDocumentFile(pdfFile, 'document.pdf', 'pdf');
-        }
-      }
-    } catch (error) {
-      console.error('Error loading document files:', error);
-      setErrorMessage('Failed to load document files');
-      throw error;
+  const handleVerify = async () => {
+    if (!selectedVerification) {
+      setErrorMessage("請先選擇一個驗證！");
+      return;
     }
-  };
-  const loadImageFile = async (verificationId, imageInfo, token) => {
+  
+    if (!docxFile || !imageFile) {
+      setErrorMessage("請確保已上傳文件和影像！");
+      return;
+    }
+  
+    if (!completedCrop || !imgRef.current) {
+      setErrorMessage("請在影像上選擇驗證範圍！");
+      return;
+    }
+  
+    setLoading(true);
+    setErrorMessage("");
+  
     try {
+      const image = imgRef.current;
+      const scaleX = image.naturalWidth / image.width;
+      const scaleY = image.naturalHeight / image.height;
+  
+      const cropX = completedCrop.x * scaleX;
+      const cropY = completedCrop.y * scaleY;
+      const cropWidth = completedCrop.width * scaleX;
+      const cropHeight = completedCrop.height * scaleY;
+      const ocrScope = [cropX, cropY, cropWidth, cropHeight];
+  
+      const formData = new FormData();
+      formData.append('docx_file', docxFile);
+      formData.append('image_file', imageFile);
+      formData.append('ocr_scope', JSON.stringify(ocrScope));
+  
+      const token = localStorage.getItem('access_token');
       const response = await fetch(
-        `http://162.38.2.150:8100/verifications/${verificationId}/image`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
-
-      if (response.ok) {
-        const imageBlob = await response.blob();
-        const imageUrl = URL.createObjectURL(imageBlob);
-
-        // Update UI state
-        setImgSrc(imageUrl);
-
-        // Create File object for file manager
-        const imageFile = new File([imageBlob], imageInfo.filename || 'image.png', {
-          type: imageBlob.type
-        });
-
-        // Handle crop scope if exists
-        if (imageInfo.ocr_scope) {
-          setSavedOcrScope(imageInfo.ocr_scope);
-          const scope = parseOcrScope(imageInfo.ocr_scope);
-          applyCropFromScope(scope, imageUrl);
-          updateImageFile(imageFile, imageInfo.filename, scope);
-        } else {
-          const img = new Image();
-          img.src = imageUrl;
-          img.onload = () => {
-            const initialCrop = centerInitialCrop(img.width, img.height);
-            setCrop(initialCrop);
-            updateImageFile(imageFile, imageInfo.filename, {
-              cropX: initialCrop.x,
-              cropY: initialCrop.y,
-              cropWidth: initialCrop.width,
-              cropHeight: initialCrop.height
-            });
-          };
+        `http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData,
         }
+      );
+  
+      if (!response.ok) throw new Error('驗證失敗');
+  
+      // Refresh verification details
+      await handleVerificationSelect(selectedVerification);
+      alert("驗證成功！");
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update page rendering when page changes
+  useEffect(() => {
+    if (pdfDocument) {
+      renderPage(currentPage);
+    }
+  }, [currentPage, pdfDocument]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pdfDocument) {
+        pdfDocument.destroy();
       }
-    } catch (error) {
-      console.error('Error loading image file:', error);
-      throw error;
-    }
-  };
-
-  // Helper function to parse OCR scope string
-  const parseOcrScope = (scopeStr) => {
-    try {
-      const [cropX, cropY, cropWidth, cropHeight] = scopeStr
-        .replace(/[\[\]]/g, '')
-        .split(',')
-        .map(val => parseFloat(val.trim()));
-
-      return { cropX, cropY, cropWidth, cropHeight };
-    } catch (error) {
-      console.error('Error parsing OCR scope:', error);
-      return null;
-    }
-  };
-
-  const applyCropFromScope = (scope, imageUrl) => {
-    if (!scope) return;
-
-    const img = new Image();
-    img.src = imageUrl;
-    img.onload = () => {
-      // Convert absolute pixel values to percentages
-      const percentCrop = {
-        x: (scope.cropX / img.naturalWidth) * 100,
-        y: (scope.cropY / img.naturalHeight) * 100,
-        width: (scope.cropWidth / img.naturalWidth) * 100,
-        height: (scope.cropHeight / img.naturalHeight) * 100,
-        unit: '%'
-      };
-
-      setCrop(percentCrop);
-      setCompletedCrop(percentCrop);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     };
-  };
-
+  }, [pdfDocument]);
   return (
     <div className="h-screen w-screen flex bg-gray-800 text-white overflow-hidden">
       {/* Left sidebar */}
@@ -505,10 +464,11 @@ export default function ChatInterface() {
           />
         </div>
 
+        {/* Replace the old message list with VerificationList */}
         <VerificationList onVerificationSelect={handleVerificationSelect} />
       </div>
 
-      {/* Main content */}
+      {/* Rest of your existing main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Upload area */}
         <div className="flex-1 p-4 flex items-start justify-center gap-4 overflow-hidden">
@@ -516,48 +476,37 @@ export default function ChatInterface() {
           <div className="h-full w-1/2 flex flex-col overflow-hidden">
             <div
               className={`flex-1 border-2 border-dashed rounded-lg overflow-hidden transition-colors 
-        ${!selectedVerification
-                  ? 'opacity-50 cursor-not-allowed border-gray-600'
-                  : selectedFile || isPdfAvailable  // Modified condition
-                    ? 'border-gray-600 cursor-default'  // Changed cursor when file is selected
-                    : isDocDragging
-                      ? 'border-blue-500 bg-blue-500/10 cursor-pointer'
-                      : 'border-gray-600 hover:border-gray-500 cursor-pointer'}`}
-              onClick={() => {
-                // Modified click handler to prevent file selection when a file exists
-                if (!selectedVerification || isPdfAvailable || selectedFile) return;
-                fileInputRef.current?.click();
+      ${!selectedVerification ? 'opacity-50 cursor-not-allowed border-gray-600' :
+                  isDocDragging ? 'border-blue-500 bg-blue-500/10 cursor-pointer' :
+                    'border-gray-600 hover:border-gray-500 cursor-pointer'}`}
+              onClick={(e) => {
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
+                }
+                handleContainerClick();
               }}
               onDragEnter={(e) => {
-                // Modified drag handler to prevent new file drops when a file exists
-                if (!selectedVerification || isPdfAvailable || selectedFile) return;
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDocDragging(true);
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
+                }
+                handleDocDragEnter(e);
               }}
               onDragOver={(e) => e.preventDefault()}
               onDragLeave={(e) => {
-                if (!selectedVerification || isPdfAvailable || selectedFile) return;
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDocDragging(false);
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
+                }
+                handleDocDragLeave(e);
               }}
               onDrop={(e) => {
-                // Modified drop handler to prevent new file drops when a file exists
-                if (!selectedVerification || isPdfAvailable || selectedFile) return;
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDocDragging(false);
-
-                const file = e.dataTransfer.files[0];
-                if (!file) return;
-
-                if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-                  handleDocxFile(file);
-                } else {
-                  setErrorMessage("請上傳 DOCX 格式的文件");
-                  if (fileInputRef.current) fileInputRef.current.value = '';
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
                 }
+                handleDocDrop(e);
               }}
             >
               <input
@@ -566,9 +515,8 @@ export default function ChatInterface() {
                 className="hidden"
                 onChange={handleFileChange}
                 accept=".docx"
-                disabled={!selectedVerification || isPdfAvailable || selectedFile}  // Modified disabled condition
+                disabled={!selectedVerification}
               />
-
               <div className="h-full overflow-auto p-4">
                 {!selectedVerification ? (
                   <div className="h-full flex flex-col items-center justify-center gap-4">
@@ -583,22 +531,7 @@ export default function ChatInterface() {
                   <div className="h-full flex flex-col items-center relative">
                     <div className="absolute top-2 right-2 z-10">
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (pdfDocument) {
-                            pdfDocument.destroy();
-                          }
-                          setPdfDocument(null);
-                          setNumPages(null);
-                          setCurrentPage(1);
-                          setSelectedFile(null);
-                          setIsPdfAvailable(false);
-                          clearFile('docx');  // Clear docx file
-                          clearFile('pdf');   // Clear pdf file
-                          if (fileInputRef.current) {
-                            fileInputRef.current.value = '';
-                          }
-                        }}
+                        onClick={clearPDF}
                         className="p-2 bg-gray-800/80 rounded-full hover:bg-gray-700/80 transition-colors"
                         title="清除文件"
                       >
@@ -609,14 +542,20 @@ export default function ChatInterface() {
                     {numPages > 1 && (
                       <div className="mt-4 flex items-center gap-4">
                         <button
-                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCurrentPage(prev => Math.max(1, prev - 1));
+                          }}
                           disabled={currentPage <= 1}
                           className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50"
                         >
                           上一頁
                         </button>
                         <button
-                          onClick={() => setCurrentPage(prev => Math.min(numPages, prev + 1))}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCurrentPage(prev => Math.min(numPages, prev + 1));
+                          }}
                           disabled={currentPage >= numPages}
                           className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50"
                         >
@@ -641,27 +580,35 @@ export default function ChatInterface() {
           <div className="h-full w-1/2 flex flex-col gap-4 overflow-hidden">
             {/* Image upload area */}
             <div
+              ref={containerRef}
               className={`h-2/3 border-2 border-dashed rounded-lg overflow-hidden transition-colors
-                ${!selectedVerification
-                  ? 'opacity-50 cursor-not-allowed border-gray-600'
-                  : isImageDragging
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : 'border-gray-600'}`}
+      ${!selectedVerification ? 'opacity-50 cursor-not-allowed border-gray-600' :
+                  isImageDragging ? 'border-blue-500 bg-blue-500/10' : 'border-gray-600'}`}
+              onContextMenu={(e) => e.preventDefault()}
               onDragEnter={(e) => {
-                if (!selectedVerification) return;
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
+                }
                 e.preventDefault();
                 e.stopPropagation();
                 setIsImageDragging(true);
               }}
               onDragOver={(e) => e.preventDefault()}
               onDragLeave={(e) => {
-                if (!selectedVerification) return;
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
+                }
                 e.preventDefault();
                 e.stopPropagation();
                 setIsImageDragging(false);
               }}
               onDrop={(e) => {
-                if (!selectedVerification) return;
+                if (!selectedVerification) {
+                  e.preventDefault();
+                  return;
+                }
                 e.preventDefault();
                 e.stopPropagation();
                 setIsImageDragging(false);
@@ -697,15 +644,14 @@ export default function ChatInterface() {
                 </label>
               ) : (
                 <div className="h-full flex flex-col">
-                  <div className="flex-1 overflow-hidden flex items-center justify-center bg-gray-900 relative">
+                  <div
+                    className="flex-1 overflow-hidden flex items-center justify-center bg-gray-900 relative"
+                    ref={containerRef}
+                  >
                     {/* Help and clear buttons container */}
                     <div className="absolute top-2 right-2 z-10 flex gap-2">
                       <button
-                        onClick={() => {
-                          if (imgSrc) URL.revokeObjectURL(imgSrc);
-                          setImgSrc('');
-                          clearFile('image');  // Clear image file
-                        }}
+                        onClick={clearImage}
                         className="p-2 bg-gray-800/80 rounded-full hover:bg-gray-700/80 transition-colors"
                         title="清除影像"
                       >
@@ -726,6 +672,8 @@ export default function ChatInterface() {
                           <h3 className="text-lg font-semibold mb-4">操作說明</h3>
                           <div className="space-y-3">
                             <p>• <span className="font-medium">拖曳框選區域：</span>點擊並拖曳可建立選取區域，調整框的大小來選擇要驗證的部分</p>
+                            <p>• <span className="font-medium">縮放影像：</span>使用滑鼠滾輪或底部的縮放滑桿來放大/縮小影像</p>
+                            <p>• <span className="font-medium">移動影像：</span>按住滑鼠右鍵並拖曳可移動整個影像位置</p>
                             <p>• <span className="font-medium">最小選取大小：</span>選取區域至少需要占整張圖片的 10%</p>
                           </div>
                           <button
@@ -750,6 +698,7 @@ export default function ChatInterface() {
                         ref={imgRef}
                         alt="Crop"
                         src={imgSrc}
+                        onLoad={onImageLoad}
                         className="max-h-full max-w-full object-contain"
                         draggable={false}
                       />
@@ -762,9 +711,10 @@ export default function ChatInterface() {
             {/* Results area */}
             <div className="w-full h-1/3 border-2 border-gray-600 rounded-lg overflow-auto">
               {selectedVerification ? (
-                <VerificationDetails
-                  verificationId={selectedVerification.id}
+                <VerificationDetails 
+                  verificationId={selectedVerification.id} 
                   onDetailsLoaded={(details) => {
+                    // Handle the loaded details if needed
                     console.log('Verification details loaded:', details);
                   }}
                 />
@@ -781,17 +731,7 @@ export default function ChatInterface() {
         <div className="p-4 bg-gray-800 border-t border-gray-700">
           <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
             <button
-              onClick={() => {
-                if (!selectedVerification) {
-                  setErrorMessage("請先選擇一個驗證！");
-                  return;
-                }
-                if (!selectedFile || !imgSrc) {
-                  setErrorMessage("請確保已上傳文件和影像！");
-                  return;
-                }
-                setErrorMessage("");
-              }}
+              onClick={handleVerify}
               disabled={!selectedVerification}
               className={`px-12 py-2 rounded-lg text-white transition-colors ${!selectedVerification
                 ? 'bg-gray-600 cursor-not-allowed opacity-50'

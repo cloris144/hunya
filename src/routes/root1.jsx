@@ -1,9 +1,17 @@
 import { MoreHorizontal, Upload, User, Search, PenSquare, HelpCircle, X } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import mammoth from "mammoth";
 import ReactCrop, { centerCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import VerificationList from './components/VerificationList';
+import VerificationDetails from './components/VerificationDetails';
+import RenameDialog from './components/RenameDialog';
+import UserMenu from './components/UserMenu';
+import useFileManager from './hooks/useFileManager';
+
+// Import pdf.js directly and set up the worker
+import * as pdfjsLib from 'pdfjs-dist';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
 function centerInitialCrop(mediaWidth, mediaHeight) {
   return centerCrop(
@@ -20,275 +28,684 @@ function centerInitialCrop(mediaWidth, mediaHeight) {
 }
 
 export default function ChatInterface() {
+  // File management
+  const {
+    selectedFiles,
+    updateDocumentFile,
+    updateImageFile,
+    updateImageScope,
+    clearFile,
+    clearAllFiles,
+    loadExistingFiles
+  } = useFileManager();
+
+  // Refs
   const fileInputRef = useRef(null);
   const imgRef = useRef(null);
-  const containerRef = useRef(null);
+  const canvasRef = useRef(null);
   const navigate = useNavigate();
+
+  // Document states
+  const [isPdfAvailable, setIsPdfAvailable] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [fileContent, setFileContent] = useState("");
+  const [pdfDocument, setPdfDocument] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [numPages, setNumPages] = useState(null);
+
+  // UI states
+  const [username, setUsername] = useState("Loading...");
   const [errorMessage, setErrorMessage] = useState("");
   const [showHelp, setShowHelp] = useState(false);
-  
-  // Image cropping states
+  const [loading, setLoading] = useState(false);
+  const [isDocDragging, setIsDocDragging] = useState(false);
+  const [isImageDragging, setIsImageDragging] = useState(false);
+  const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
+
+  // Image states
   const [imgSrc, setImgSrc] = useState('');
   const [crop, setCrop] = useState();
-  const [scale, setScale] = useState(1);
   const [completedCrop, setCompletedCrop] = useState(null);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [selectedVerification, setSelectedVerification] = useState(null);
+  const [savedOcrScope, setSavedOcrScope] = useState(null);
 
+  // Render PDF page when document or page changes
+  useEffect(() => {
+    if (pdfDocument && currentPage) {
+      renderPage(currentPage);
+    }
+  }, [pdfDocument, currentPage]);
+
+  // Authentication check
   useEffect(() => {
     const token = localStorage.getItem('access_token');
-    if (!token) {
-      navigate('/login');
-    }
+    if (!token) navigate('/login');
   }, [navigate]);
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setSelectedFile(file.name);
-
-      if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          mammoth
-            .convertToHtml({ arrayBuffer: e.target.result })
-            .then((result) => {
-              setFileContent(result.value);
-            })
-            .catch((err) => console.error("Error converting docx:", err));
-        };
-        reader.readAsArrayBuffer(file);
+  // Load user data
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch('http://162.38.2.150:8100/users/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('Failed to fetch user data');
+        const userData = await response.json();
+        setUsername(userData.username);
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+        setUsername("Error");
       }
+    };
+    fetchUserData();
+  }, []);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (pdfDocument) pdfDocument.destroy();
+      if (imgSrc) URL.revokeObjectURL(imgSrc);
+      clearAllFiles();
+    };
+  }, []);
+
+  // Main handlers
+  const handleVerificationSelect = async (verification) => {
+    // Clear states if deselecting verification
+    if (!verification || (selectedVerification && verification.id !== selectedVerification.id)) {
+      clearState();
+      clearAllFiles();
+    }
+
+    // Update selected verification state
+    setSelectedVerification(verification);
+    if (!verification) return;
+
+    try {
+      // Get the authentication token
+      const token = localStorage.getItem('access_token');
+      if (!token) throw new Error('No authentication token found');
+
+      // Fetch verification details
+      const response = await fetch(`http://162.38.2.150:8100/verifications/${verification.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch verification details');
+      const data = await response.json();
+
+      // Handle document files (DOCX/PDF)
+      if (data.docx_info?.exists || data.pdf_info?.exists) {
+        await loadDocumentFiles(verification.id, data, token);
+      }
+
+      // Handle image file
+      if (data.image_info?.exists) {
+        await loadImageFile(verification.id, data.image_info, token);
+      }
+
+    } catch (error) {
+      console.error('Error in handleVerificationSelect:', error);
+      setErrorMessage('Failed to load verification data');
     }
   };
 
+  const handleCreateVerification = async (name) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch('http://162.38.2.150:8100/verifications?verification_name=' + encodeURIComponent(name), {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error('Failed to create verification');
+
+      const newVerification = await response.json();
+      setIsRenameDialogOpen(false);
+
+      window.dispatchEvent(new CustomEvent('refreshVerifications'));
+
+      if (newVerification) {
+        handleVerificationSelect({
+          id: newVerification.id,
+          verification_name: newVerification.verification_name,
+          status: newVerification.status,
+          created_at: newVerification.created_at
+        });
+      }
+    } catch (error) {
+      console.error('Error creating verification:', error);
+      setErrorMessage('Failed to create verification');
+    }
+  };
+
+  // Document handlers
+  const handleDocxFile = async (file) => {
+    setLoading(true);
+    setErrorMessage("");
+
+    try {
+      updateDocumentFile(file, file.name, 'docx');
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('http://162.38.3.101:8101/doc_to_pdf', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('PDF conversion failed');
+
+      const pdfData = await response.arrayBuffer();
+      const pdfBlob = new Blob([pdfData], { type: 'application/pdf' });
+      const pdfFile = new File([pdfBlob], 'document.pdf', { type: 'application/pdf' });
+
+      // Update file manager state
+      updateDocumentFile(pdfFile, 'document.pdf', 'pdf');
+
+      // Update UI state
+      if (pdfDocument) {
+        pdfDocument.destroy();
+        setPdfDocument(null);
+      }
+
+      const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+      const pdf = await loadingTask.promise;
+
+      setPdfDocument(pdf);
+      setNumPages(pdf.numPages);
+      setCurrentPage(1);
+      setSelectedFile(file.name);
+
+    } catch (error) {
+      console.error('Error converting document:', error);
+      setErrorMessage("文件轉換失敗，請稍後再試");
+      clearFile('docx');
+      clearFile('pdf');
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      handleDocxFile(file);
+    } else {
+      setErrorMessage("請上傳 DOCX 格式的文件");
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const renderPage = async (pageNum) => {
+    if (!pdfDocument || !canvasRef.current) return;
+
+    try {
+        const page = await pdfDocument.getPage(pageNum);
+        const canvas = canvasRef.current;
+        const context = canvas.getContext('2d');
+
+        // Clear previous content
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        // Cancel any ongoing rendering task before starting a new one
+        if (canvas.renderTask) {
+            canvas.renderTask.cancel();
+        }
+
+        // Start new rendering task and store reference
+        canvas.renderTask = page.render({
+            canvasContext: context,
+            viewport: viewport
+        });
+
+        await canvas.renderTask.promise;
+    } catch (error) {
+        if (error.name !== 'RenderingCancelledException') {
+            console.error('Error rendering PDF page:', error);
+            setErrorMessage('PDF 渲染失敗');
+        }
+    }
+};
+
+
+  // Image handlers
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    updateImageFile(file, file.name);
+
     const reader = new FileReader();
     reader.addEventListener('load', () => {
-      setImgSrc(reader.result?.toString() || '');
+      const imageUrl = reader.result?.toString() || '';
+      setImgSrc(imageUrl);
+
+      const img = new Image();
+      img.src = imageUrl;
+      img.onload = () => {
+        const initialCrop = centerInitialCrop(img.width, img.height);
+        setCrop(initialCrop);
+        setCompletedCrop(null);
+
+        updateImageScope({
+          x: initialCrop.x,
+          y: initialCrop.y,
+          width: initialCrop.width,
+          height: initialCrop.height
+        });
+      };
     });
     reader.readAsDataURL(file);
   };
 
-  const onImageLoad = (e) => {
-    const { width, height } = e.currentTarget;
-    setCrop(centerInitialCrop(width, height));
-    setPosition({ x: 0, y: 0 });
-  };
-
   const handleCropChange = (_, percentCrop) => {
-    // Minimum size in percentage (30% of the image)
     const MIN_SIZE = 10;
-
     let newCrop = { ...percentCrop };
 
-    // Enforce minimum width
     if (percentCrop.width < MIN_SIZE) {
       newCrop.width = MIN_SIZE;
-      // Adjust x position to keep the crop within bounds
       newCrop.x = Math.min(percentCrop.x, 100 - MIN_SIZE);
     }
 
-    // Enforce minimum height
     if (percentCrop.height < MIN_SIZE) {
       newCrop.height = MIN_SIZE;
-      // Adjust y position to keep the crop within bounds
       newCrop.y = Math.min(percentCrop.y, 100 - MIN_SIZE);
     }
 
     setCrop(newCrop);
+    updateImageScope(newCrop);
   };
 
-  const handleZoomChange = (e) => {
-    setScale(Number(e.target.value));
-    setPosition({ x: 0, y: 0 });
-  };
-
-  const handleWheel = (e) => {
-    e.preventDefault();
-    
-    const delta = e.deltaY;
-    const ZOOM_SPEED = 0.1;
-    
-    setScale(prevScale => {
-      const newScale = delta > 0 
-        ? Math.max(0.1, prevScale - ZOOM_SPEED)  // Zoom out
-        : Math.min(3, prevScale + ZOOM_SPEED);   // Zoom in
-      return newScale;
-    });
-  };
-
-  const handleMouseDown = (e) => {
-    // Only allow dragging if right-clicking on the image itself
-    if (e.target.tagName === 'IMG') {
-      e.preventDefault();
-      setIsDragging(true);
-      setDragStart({
-        x: e.clientX - position.x,
-        y: e.clientY - position.y
-      });
-    }
-  };
-
-  const handleMouseMove = (e) => {
-    if (isDragging) {
-      const newX = e.clientX - dragStart.x;
-      const newY = e.clientY - dragStart.y;
-      setPosition({ x: newX, y: newY });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const clearImage = () => {
+  // Helper functions
+  const clearState = () => {
+    if (pdfDocument) pdfDocument.destroy();
+    setPdfDocument(null);
+    setNumPages(null);
+    setCurrentPage(1);
+    setSelectedFile(null);
+    setIsPdfAvailable(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (imgSrc) URL.revokeObjectURL(imgSrc);
     setImgSrc('');
-    setCrop(undefined);
-    setScale(1);
     setCompletedCrop(null);
-    setPosition({ x: 0, y: 0 });
+    setCrop(null);
+    setSavedOcrScope(null);
+    setErrorMessage('');
   };
 
-  const handleVerify = () => {
-    if (!selectedFile || !imgSrc) {
-      setErrorMessage("請確保已上傳文件和影像！");
-      return;
-    }
+  const loadDocumentFiles = async (verificationId, data, token) => {
+    try {
+      // Handle DOCX file first
+      console.log('if docx')
+      console.log(data.docx_info?.exists)
+      if (data.docx_info?.exists) {
+        console.log('exdocx')
+        const docxResponse = await fetch(
+          `http://162.38.2.150:8100/verifications/${verificationId}/docx`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
 
-    setErrorMessage("");
-    
-    if (!completedCrop || !imgRef.current) {
-      console.log("full");
-    } else {
-      const imageElement = imgRef.current;
-      const { naturalWidth, naturalHeight } = imageElement;
-      
-      const x_min = Math.round((completedCrop.x / 100) * naturalWidth);
-      const y_min = Math.round((completedCrop.y / 100) * naturalHeight);
-      const x_max = Math.round(((completedCrop.x + completedCrop.width) / 100) * naturalWidth);
-      const y_max = Math.round(((completedCrop.y + completedCrop.height) / 100) * naturalHeight);
-      
-      console.log(`(${x_min},${y_min},${x_max},${y_max})`);
+        if (docxResponse.ok) {
+          const docxBlob = await docxResponse.blob();
+          const docxFile = new File([docxBlob], data.docx_info.filename || 'document.docx', {
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          });
+
+          // Update file manager state with DOCX file
+          updateDocumentFile(docxFile, data.docx_info.filename, 'docx');
+          setSelectedFile(data.docx_info.filename);
+
+          // Only convert to PDF if PDF doesn't exist or isn't available
+          if (!data.pdf_info?.exists || !data.pdf_info?.available) {
+            await handleDocxFile(docxFile);
+            return;
+          }
+        }
+      }
+
+      // Handle existing PDF if available
+      if (data.pdf_info?.exists && data.pdf_info?.available) {
+        const pdfResponse = await fetch(
+          `http://162.38.2.150:8100/verifications/${verificationId}/pdf`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+
+        if (pdfResponse.ok) {
+          const pdfData = await pdfResponse.arrayBuffer();
+
+          // Update PDF state for rendering
+          const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+          const pdf = await loadingTask.promise;
+          setPdfDocument(pdf);
+          setNumPages(pdf.numPages);
+          setCurrentPage(1);
+          setIsPdfAvailable(true);
+
+          // Update file manager state with PDF file
+          const pdfBlob = new Blob([pdfData], { type: 'application/pdf' });
+          const pdfFile = new File([pdfBlob], 'document.pdf', { type: 'application/pdf' });
+          updateDocumentFile(pdfFile, 'document.pdf', 'pdf');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading document files:', error);
+      setErrorMessage('Failed to load document files');
+      throw error;
     }
-    
-    alert("驗證成功！");
+  };
+  const loadImageFile = async (verificationId, imageInfo, token) => {
+    try {
+      const response = await fetch(
+        `http://162.38.2.150:8100/verifications/${verificationId}/image`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (response.ok) {
+        const imageBlob = await response.blob();
+        const imageUrl = URL.createObjectURL(imageBlob);
+
+        // Update UI state
+        setImgSrc(imageUrl);
+
+        // Create File object for file manager
+        const imageFile = new File([imageBlob], imageInfo.filename || 'image.png', {
+          type: imageBlob.type
+        });
+
+        // Handle crop scope if exists
+        if (imageInfo.ocr_scope) {
+          setSavedOcrScope(imageInfo.ocr_scope);
+          const scope = parseOcrScope(imageInfo.ocr_scope);
+          applyCropFromScope(scope, imageUrl);
+          updateImageFile(imageFile, imageInfo.filename, scope);
+        } else {
+          const img = new Image();
+          img.src = imageUrl;
+          img.onload = () => {
+            const initialCrop = centerInitialCrop(img.width, img.height);
+            setCrop(initialCrop);
+            updateImageFile(imageFile, imageInfo.filename, {
+              cropX: initialCrop.x,
+              cropY: initialCrop.y,
+              cropWidth: initialCrop.width,
+              cropHeight: initialCrop.height
+            });
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Error loading image file:', error);
+      throw error;
+    }
   };
 
-  // Attach event listeners to document only when dragging
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+  // Helper function to parse OCR scope string
+  const parseOcrScope = (scopeStr) => {
+    try {
+      const [cropX, cropY, cropWidth, cropHeight] = scopeStr
+        .replace(/[\[\]]/g, '')
+        .split(',')
+        .map(val => parseFloat(val.trim()));
 
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
+      return { cropX, cropY, cropWidth, cropHeight };
+    } catch (error) {
+      console.error('Error parsing OCR scope:', error);
+      return null;
+    }
+  };
+
+  const applyCropFromScope = (scope, imageUrl) => {
+    if (!scope) return;
+
+    const img = new Image();
+    img.src = imageUrl;
+    img.onload = () => {
+      // Convert absolute pixel values to percentages
+      const percentCrop = {
+        x: (scope.cropX / img.naturalWidth) * 100,
+        y: (scope.cropY / img.naturalHeight) * 100,
+        width: (scope.cropWidth / img.naturalWidth) * 100,
+        height: (scope.cropHeight / img.naturalHeight) * 100,
+        unit: '%'
       };
-    }
-  }, [isDragging, dragStart]);
+
+      setCrop(percentCrop);
+      setCompletedCrop(percentCrop);
+    };
+  };
 
   return (
-    <div className="flex min-h-screen bg-gray-800 text-white overflow-hidden">
+    <div className="h-screen w-screen flex bg-gray-800 text-white overflow-hidden">
       {/* Left sidebar */}
-      <div className="w-52 border-r border-gray-700 flex flex-col">
+      <div className="w-52 border-r border-gray-700 flex flex-col overflow-hidden">
         {/* Top navigation */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+        <div className="flex-none flex items-center justify-between p-4 border-b border-gray-700">
+          <UserMenu username={username} />
           <div className="flex items-center gap-2">
-            <User className="w-5 h-5" />
-            <span>brian</span>
+            <button
+              onClick={() => setIsRenameDialogOpen(true)}
+              className="p-1 hover:bg-gray-700 rounded-full transition-colors"
+            >
+              <PenSquare className="w-5 h-5" />
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <Search className="w-5 h-5" />
-            <PenSquare className="w-5 h-5" />
-          </div>
+          <RenameDialog
+            isOpen={isRenameDialogOpen}
+            onClose={() => setIsRenameDialogOpen(false)}
+            onSave={handleCreateVerification}
+          />
         </div>
 
-        {/* Message list */}
-        <div className="flex-1 p-2 overflow-y-auto">
-          {[1, 2, 3].map((item) => (
-            <div
-              key={item}
-              className="flex items-center justify-between p-3 hover:bg-gray-700 rounded-lg cursor-pointer"
-            >
-              <span>七七乳</span>
-              <MoreHorizontal className="w-5 h-5 text-gray-400" />
-            </div>
-          ))}
-        </div>
+        <VerificationList onVerificationSelect={handleVerificationSelect} />
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col bg-gray-800 overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Upload area */}
-        <div className="flex-1 p-8 flex items-center justify-center gap-8">
+        <div className="flex-1 p-4 flex items-start justify-center gap-4 overflow-hidden">
           {/* Document upload area */}
-          <div 
-            className="w-full max-w-2xl h-full border-2 border-dashed border-gray-600 rounded-lg flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-gray-500 transition-colors"
-            onClick={handleUploadClick}
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              onChange={handleFileChange}
-              accept=".docx"
-            />
+          <div className="h-full w-1/2 flex flex-col overflow-hidden">
+            <div
+              className={`flex-1 border-2 border-dashed rounded-lg overflow-hidden transition-colors 
+        ${!selectedVerification
+                  ? 'opacity-50 cursor-not-allowed border-gray-600'
+                  : selectedFile || isPdfAvailable  // Modified condition
+                    ? 'border-gray-600 cursor-default'  // Changed cursor when file is selected
+                    : isDocDragging
+                      ? 'border-blue-500 bg-blue-500/10 cursor-pointer'
+                      : 'border-gray-600 hover:border-gray-500 cursor-pointer'}`}
+              onClick={() => {
+                // Modified click handler to prevent file selection when a file exists
+                if (!selectedVerification || isPdfAvailable || selectedFile) return;
+                fileInputRef.current?.click();
+              }}
+              onDragEnter={(e) => {
+                // Modified drag handler to prevent new file drops when a file exists
+                if (!selectedVerification || isPdfAvailable || selectedFile) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDocDragging(true);
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              onDragLeave={(e) => {
+                if (!selectedVerification || isPdfAvailable || selectedFile) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDocDragging(false);
+              }}
+              onDrop={(e) => {
+                // Modified drop handler to prevent new file drops when a file exists
+                if (!selectedVerification || isPdfAvailable || selectedFile) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDocDragging(false);
 
-            <div className="w-full max-w-2xl mt-2 overflow-auto h-full border-gray-600 rounded-lg p-4">
-              {fileContent ? (
-                <div
-                  className="text-gray-300"
-                  dangerouslySetInnerHTML={{ __html: fileContent }}
-                />
-              ) : (
-                <div className="w-full max-w-2xl h-full flex flex-col items-center justify-center gap-4">
-                  <Upload className="w-8 h-8 text-gray-400" />
-                  <span className="text-gray-300">上傳文件</span>
-                </div>
-              )}
+                const file = e.dataTransfer.files[0];
+                if (!file) return;
+
+                if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+                  handleDocxFile(file);
+                } else {
+                  setErrorMessage("請上傳 DOCX 格式的文件");
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }
+              }}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileChange}
+                accept=".docx"
+                disabled={!selectedVerification || isPdfAvailable || selectedFile}  // Modified disabled condition
+              />
+
+              <div className="h-full overflow-auto p-4">
+                {!selectedVerification ? (
+                  <div className="h-full flex flex-col items-center justify-center gap-4">
+                    <Upload className="w-8 h-8 text-gray-400" />
+                    <span className="text-gray-400">請先選擇一個驗證</span>
+                  </div>
+                ) : loading ? (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+                  </div>
+                ) : pdfDocument ? (
+                  <div className="h-full flex flex-col items-center relative">
+                    <div className="absolute top-2 right-2 z-10">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (pdfDocument) {
+                            pdfDocument.destroy();
+                          }
+                          setPdfDocument(null);
+                          setNumPages(null);
+                          setCurrentPage(1);
+                          setSelectedFile(null);
+                          setIsPdfAvailable(false);
+                          clearFile('docx');  // Clear docx file
+                          clearFile('pdf');   // Clear pdf file
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = '';
+                          }
+                        }}
+                        className="p-2 bg-gray-800/80 rounded-full hover:bg-gray-700/80 transition-colors"
+                        title="清除文件"
+                      >
+                        <X className="w-5 h-5 text-gray-300" />
+                      </button>
+                    </div>
+                    <canvas ref={canvasRef} className="max-w-full" />
+                    {numPages > 1 && (
+                      <div className="mt-4 flex items-center gap-4">
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          disabled={currentPage <= 1}
+                          className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50"
+                        >
+                          上一頁
+                        </button>
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(numPages, prev + 1))}
+                          disabled={currentPage >= numPages}
+                          className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50"
+                        >
+                          下一頁
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center gap-4">
+                    <Upload className="w-8 h-8 text-gray-400" />
+                    <span className="text-gray-300">
+                      {isDocDragging ? "放開以上傳文件" : "拖曳或點擊上傳文件"}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Image upload and results area */}
-          <div className="flex-1 flex flex-col gap-8 w-full max-w-2xl h-full">
+          {/* Image and results area */}
+          <div className="h-full w-1/2 flex flex-col gap-4 overflow-hidden">
             {/* Image upload area */}
-            <div 
-              ref={containerRef}
-              className="w-full max-w-2xl h-2/3 border-2 border-dashed border-gray-600 rounded-lg overflow-hidden"
-              onContextMenu={(e) => e.preventDefault()}
+            <div
+              className={`h-2/3 border-2 border-dashed rounded-lg overflow-hidden transition-colors
+                ${!selectedVerification
+                  ? 'opacity-50 cursor-not-allowed border-gray-600'
+                  : isImageDragging
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-gray-600'}`}
+              onDragEnter={(e) => {
+                if (!selectedVerification) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setIsImageDragging(true);
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              onDragLeave={(e) => {
+                if (!selectedVerification) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setIsImageDragging(false);
+              }}
+              onDrop={(e) => {
+                if (!selectedVerification) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setIsImageDragging(false);
+
+                const file = e.dataTransfer.files[0];
+                if (!file || !file.type.startsWith('image/')) return;
+
+                const reader = new FileReader();
+                reader.addEventListener('load', () => {
+                  setImgSrc(reader.result?.toString() || '');
+                });
+                reader.readAsDataURL(file);
+              }}
             >
-              {!imgSrc ? (
-                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700/10">
+              {!selectedVerification ? (
+                <div className="h-full flex flex-col items-center justify-center">
                   <Upload className="w-8 h-8 text-gray-400" />
-                  <span className="text-gray-300 mt-2">上傳影像</span>
+                  <span className="text-gray-400 mt-2">請先選擇一個驗證</span>
+                </div>
+              ) : !imgSrc ? (
+                <label className="h-full flex flex-col items-center justify-center cursor-pointer hover:bg-gray-700/10">
+                  <Upload className="w-8 h-8 text-gray-400" />
+                  <span className="text-gray-300 mt-2">
+                    {isImageDragging ? "放開以上傳影像" : "拖曳或點擊上傳影像"}
+                  </span>
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleImageChange}
                     className="hidden"
+                    disabled={!selectedVerification}
                   />
                 </label>
               ) : (
                 <div className="h-full flex flex-col">
-                  <div 
-                    className="flex-1 overflow-hidden flex items-center justify-center bg-gray-900 relative"
-                    onWheel={handleWheel}
-                  >
+                  <div className="flex-1 overflow-hidden flex items-center justify-center bg-gray-900 relative">
                     {/* Help and clear buttons container */}
                     <div className="absolute top-2 right-2 z-10 flex gap-2">
                       <button
-                        onClick={clearImage}
+                        onClick={() => {
+                          if (imgSrc) URL.revokeObjectURL(imgSrc);
+                          setImgSrc('');
+                          clearFile('image');  // Clear image file
+                        }}
                         className="p-2 bg-gray-800/80 rounded-full hover:bg-gray-700/80 transition-colors"
                         title="清除影像"
                       >
@@ -309,8 +726,6 @@ export default function ChatInterface() {
                           <h3 className="text-lg font-semibold mb-4">操作說明</h3>
                           <div className="space-y-3">
                             <p>• <span className="font-medium">拖曳框選區域：</span>點擊並拖曳可建立選取區域，調整框的大小來選擇要驗證的部分</p>
-                            <p>• <span className="font-medium">縮放影像：</span>使用滑鼠滾輪或底部的縮放滑桿來放大/縮小影像</p>
-                            <p>• <span className="font-medium">移動影像：</span>按住滑鼠右鍵並拖曳可移動整個影像位置</p>
                             <p>• <span className="font-medium">最小選取大小：</span>選取區域至少需要占整張圖片的 10%</p>
                           </div>
                           <button
@@ -335,40 +750,29 @@ export default function ChatInterface() {
                         ref={imgRef}
                         alt="Crop"
                         src={imgSrc}
-                        style={{ 
-                          transform: `scale(${scale}) translate(${position.x}px, ${position.y}px)`,
-                          transition: isDragging ? 'none' : 'transform 0.3s'
-                        }}
-                        onLoad={onImageLoad}
-                        onMouseDown={handleMouseDown}
                         className="max-h-full max-w-full object-contain"
                         draggable={false}
                       />
                     </ReactCrop>
-                  </div>
-                  
-                  <div className="p-4 bg-gray-800 border-t border-gray-700">
-                    <div className="flex items-center gap-4">
-                      <span className="text-gray-300 whitespace-nowrap">縮放:</span>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="3"
-                        step="0.1"
-                        value={scale}
-                        onChange={handleZoomChange}
-                        className="w-full"
-                      />
-                      <span className="text-gray-300 w-12">{scale.toFixed(2)}x</span>
-                    </div>
                   </div>
                 </div>
               )}
             </div>
 
             {/* Results area */}
-            <div className="w-full max-w-2xl h-1/3 border-2 border-gray-600 rounded-lg flex flex-col items-center justify-center gap-4">
-              <span className="text-gray-300">結果</span>
+            <div className="w-full h-1/3 border-2 border-gray-600 rounded-lg overflow-auto">
+              {selectedVerification ? (
+                <VerificationDetails
+                  verificationId={selectedVerification.id}
+                  onDetailsLoaded={(details) => {
+                    console.log('Verification details loaded:', details);
+                  }}
+                />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center gap-4">
+                  <span className="text-gray-300">選擇一個驗證來查看結果</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -377,8 +781,22 @@ export default function ChatInterface() {
         <div className="p-4 bg-gray-800 border-t border-gray-700">
           <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
             <button
-              onClick={handleVerify}
-              className="px-12 py-2 bg-blue-800 hover:bg-blue-500 rounded-lg text-white transition-colors"
+              onClick={() => {
+                if (!selectedVerification) {
+                  setErrorMessage("請先選擇一個驗證！");
+                  return;
+                }
+                if (!selectedFile || !imgSrc) {
+                  setErrorMessage("請確保已上傳文件和影像！");
+                  return;
+                }
+                setErrorMessage("");
+              }}
+              disabled={!selectedVerification}
+              className={`px-12 py-2 rounded-lg text-white transition-colors ${!selectedVerification
+                ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                : 'bg-blue-800 hover:bg-blue-500'
+                }`}
             >
               驗證
             </button>

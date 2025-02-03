@@ -1,17 +1,14 @@
 import React, { useState } from 'react';
-
 function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
   // 處理表單提交
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-
     try {
       const response = await fetch('http://162.38.3.101:8100/token', {
         method: 'POST',
@@ -23,9 +20,7 @@ function Login() {
           password,
         }),
       });
-
       const data = await response.json();
-
       if (response.ok) {
         // 成功獲得認證令牌，保存 token
         localStorage.setItem('access_token', data.access_token);
@@ -43,7 +38,6 @@ function Login() {
       setIsLoading(false);
     }
   };
-
   return (
     <div className="flex h-screen bg-indigo-700">
       <div className="w-full max-w-xs m-auto bg-indigo-100 rounded p-5">
@@ -92,5 +86,4 @@ function Login() {
     </div>
   );
 }
-
 export default Login;
