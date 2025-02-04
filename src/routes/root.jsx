@@ -67,7 +67,92 @@ export default function ChatInterface() {
   const [completedCrop, setCompletedCrop] = useState(null);
   const [selectedVerification, setSelectedVerification] = useState(null);
   const [savedOcrScope, setSavedOcrScope] = useState(null);
+  const handleVerification = async () => {
+    if (!selectedVerification) {
+      setErrorMessage("請先選擇一個驗證！");
+      return;
+    }
+    if (!selectedFiles.docx && !selectedFiles.image) {
+      setErrorMessage("請確保已上傳文件和影像！");
+      return;
+    }
 
+    setLoading(true);
+    setErrorMessage("");
+
+    try {
+      const formData = new FormData();
+      
+      // Add docx file if exists
+      if (selectedFiles.docx) {
+        formData.append('docx_file', selectedFiles.docx.file);
+      }
+
+      // Add image file if exists
+      if (selectedFiles.image) {
+        formData.append('image_file', selectedFiles.image.file);
+      }
+
+      // Add OCR scope if exists
+      if (selectedFiles.image?.scope) {
+        const scope = serializeCropScope(selectedFiles.image.scope);
+        console.log(selectedFiles.image.scope)
+        formData.append('ocr_scope', scope);
+      }
+
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to upload files');
+      }
+
+      const result = await response.json();
+
+      if (result.message === "Verification completed") {
+        // Refresh verifications list to update status
+        window.dispatchEvent(new CustomEvent('refreshVerifications'));
+        
+        // Fetch updated verification details
+        const detailsResponse = await fetch(
+          `http://162.38.2.150:8100/verifications/${selectedVerification.id}`,
+          {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }
+        );
+
+        if (!detailsResponse.ok) {
+          throw new Error('Failed to fetch verification details');
+        }
+
+        const details = await detailsResponse.json();
+        
+        // Update UI with new details
+        setSelectedVerification({
+          ...selectedVerification,
+          status: details.status
+        });
+
+      } else if (result.system_component === "docx_processing") {
+        // Handle error case
+        setErrorMessage(
+          `文件缺少必要欄位：${result.missing_elements.join(', ')}`
+        );
+      }
+
+    } catch (error) {
+      console.error('Verification error:', error);
+      setErrorMessage('驗證過程發生錯誤，請稍後再試');
+    } finally {
+      setLoading(false);
+    }
+  };
   // Render PDF page when document or page changes
   useEffect(() => {
     if (pdfDocument && currentPage) {
@@ -245,36 +330,36 @@ export default function ChatInterface() {
     if (!pdfDocument || !canvasRef.current) return;
 
     try {
-        const page = await pdfDocument.getPage(pageNum);
-        const canvas = canvasRef.current;
-        const context = canvas.getContext('2d');
+      const page = await pdfDocument.getPage(pageNum);
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
 
-        // Clear previous content
-        context.clearRect(0, 0, canvas.width, canvas.height);
+      // Clear previous content
+      context.clearRect(0, 0, canvas.width, canvas.height);
 
-        const viewport = page.getViewport({ scale: 1.5 });
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
+      const viewport = page.getViewport({ scale: 1.5 });
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
 
-        // Cancel any ongoing rendering task before starting a new one
-        if (canvas.renderTask) {
-            canvas.renderTask.cancel();
-        }
+      // Cancel any ongoing rendering task before starting a new one
+      if (canvas.renderTask) {
+        canvas.renderTask.cancel();
+      }
 
-        // Start new rendering task and store reference
-        canvas.renderTask = page.render({
-            canvasContext: context,
-            viewport: viewport
-        });
+      // Start new rendering task and store reference
+      canvas.renderTask = page.render({
+        canvasContext: context,
+        viewport: viewport
+      });
 
-        await canvas.renderTask.promise;
+      await canvas.renderTask.promise;
     } catch (error) {
-        if (error.name !== 'RenderingCancelledException') {
-            console.error('Error rendering PDF page:', error);
-            setErrorMessage('PDF 渲染失敗');
-        }
+      if (error.name !== 'RenderingCancelledException') {
+        console.error('Error rendering PDF page:', error);
+        setErrorMessage('PDF 渲染失敗');
+      }
     }
-};
+  };
 
 
   // Image handlers
@@ -449,61 +534,72 @@ export default function ChatInterface() {
   };
 
   // Helper function to parse OCR scope string
-// Helper function to parse OCR scope string
-const parseOcrScope = (scopeStr, imgDimensions) => {
-  try {
-    // Check if the scope is already in percentage format
-    const isPercentageFormat = scopeStr.includes('%');
-    
-    const [cropHeight, cropWidth, cropX, cropY] = scopeStr
-      .replace(/[\[\]%]/g, '')
-      .split(',')
-      .map(val => parseFloat(val.trim()));
+  // Helper function to parse OCR scope string
+  const parseOcrScope = (scopeStr, imgDimensions) => {
+    try {
+      // Check if the scope is already in percentage format
+      const isPercentageFormat = scopeStr.includes('%');
 
-    // If imgDimensions are provided and it's not in percentage format, convert to percentage
-    if (!isPercentageFormat && imgDimensions) {
-      return {
-        cropX: (cropX / imgDimensions.width) * 100,
-        cropY: (cropY / imgDimensions.height) * 100,
-        cropWidth: (cropWidth / imgDimensions.width) * 100,
-        cropHeight: (cropHeight / imgDimensions.height) * 100
-      };
+      const [cropHeight, cropWidth, cropX, cropY] = scopeStr
+        .replace(/[\[\]%]/g, '')
+        .split(',')
+        .map(val => parseFloat(val.trim()));
+
+      // If imgDimensions are provided and it's not in percentage format, convert to percentage
+      if (!isPercentageFormat && imgDimensions) {
+        return {
+          cropX: (cropX / imgDimensions.width) * 100,
+          cropY: (cropY / imgDimensions.height) * 100,
+          cropWidth: (cropWidth / imgDimensions.width) * 100,
+          cropHeight: (cropHeight / imgDimensions.height) * 100
+        };
+      }
+
+      // If already in percentage or no dimensions provided, return as-is
+      return { cropX, cropY, cropWidth, cropHeight };
+    } catch (error) {
+      console.error('Error parsing OCR scope:', error);
+      return null;
     }
+  };
 
-    // If already in percentage or no dimensions provided, return as-is
-    return { cropX, cropY, cropWidth, cropHeight };
-  } catch (error) {
-    console.error('Error parsing OCR scope:', error);
-    return null;
-  }
-};
-const serializeCropScope = (crop) => {
-  // Ensure the crop is in percentage format
-  return `[${crop.x.toFixed(2)}%, ${crop.y.toFixed(2)}%, ${crop.width.toFixed(2)}%, ${crop.height.toFixed(2)}%]`;
-};
-const applyCropFromScope = (scope, imageUrl) => {
-  if (!scope) return;
+  const serializeCropScope = (cropData) => {
+    if (!cropData) return null;
+    
+    // Extract values, ensuring they exist and are numbers
+    const x = parseFloat(cropData.cropX) || 0;
+    const y = parseFloat(cropData.cropY) || 0;
+    const width = parseFloat(cropData.cropWidth) || 0;
+    const height = parseFloat(cropData.cropHeight) || 0;
 
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      // Ensure the crop is in percentage format
-      const percentCrop = {
-        x: scope.cropX,
-        y: scope.cropY,
-        width: scope.cropWidth,
-        height: scope.cropHeight,
-        unit: '%'
+    // Return in the required format [crop_height, crop_width, crop_x, crop_y]
+    return `[${height.toFixed(2)}, ${width.toFixed(2)}, ${x.toFixed(2)}, ${y.toFixed(2)}]`;
+  };
+
+
+  const applyCropFromScope = (scope, imageUrl) => {
+    if (!scope) return;
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        // Ensure the crop is in percentage format
+        const percentCrop = {
+          x: scope.cropX,
+          y: scope.cropY,
+          width: scope.cropWidth,
+          height: scope.cropHeight,
+          unit: '%'
+        };
+
+        setCrop(percentCrop);
+        setCompletedCrop(percentCrop);
+        resolve(percentCrop);
       };
-
-      setCrop(percentCrop);
-      setCompletedCrop(percentCrop);
-      resolve(percentCrop);
-    };
-    img.onerror = reject;
-    img.src = imageUrl;
-  });
-};
+      img.onerror = reject;
+      img.src = imageUrl;
+    });
+  };
 
   return (
     <div className="h-screen w-screen flex bg-gray-800 text-white overflow-hidden">
@@ -801,32 +897,30 @@ const applyCropFromScope = (scope, imageUrl) => {
 
         {/* Footer */}
         <div className="p-4 bg-gray-800 border-t border-gray-700">
-          <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
-            <button
-              onClick={() => {
-                if (!selectedVerification) {
-                  setErrorMessage("請先選擇一個驗證！");
-                  return;
-                }
-                if (!selectedFile || !imgSrc) {
-                  setErrorMessage("請確保已上傳文件和影像！");
-                  return;
-                }
-                setErrorMessage("");
-              }}
-              disabled={!selectedVerification}
-              className={`px-12 py-2 rounded-lg text-white transition-colors ${!selectedVerification
-                ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                : 'bg-blue-800 hover:bg-blue-500'
-                }`}
-            >
-              驗證
-            </button>
-            {errorMessage && (
-              <div className="text-red-500">{errorMessage}</div>
-            )}
-          </div>
-        </div>
+      <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
+        <button
+          onClick={handleVerification}
+          disabled={!selectedVerification || loading}
+          className={`px-12 py-2 rounded-lg text-white transition-colors ${
+            !selectedVerification || loading
+              ? 'bg-gray-600 cursor-not-allowed opacity-50'
+              : 'bg-blue-800 hover:bg-blue-500'
+          }`}
+        >
+          {loading ? (
+            <div className="flex items-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+              處理中...
+            </div>
+          ) : (
+            '驗證'
+          )}
+        </button>
+        {errorMessage && (
+          <div className="text-red-500 text-sm whitespace-pre-line">{errorMessage}</div>
+        )}
+      </div>
+    </div>
       </div>
     </div>
   );
