@@ -79,55 +79,69 @@ export default function ChatInterface() {
       setErrorMessage("請確保已上傳文件和影像！");
       return;
     }
-
+  
     setLoading(true);
     setErrorMessage("");
-
+  
     try {
       const formData = new FormData();
+  
       if (selectedFiles.docx) {
         formData.append('docx_file', selectedFiles.docx.file);
       }
       if (selectedFiles.image) {
         formData.append('image_file', selectedFiles.image.file);
       }
-
+      if (selectedFiles.image?.scope) {
+        const scope = serializeCropScope(selectedFiles.image.scope);
+        formData.append('ocr_scope', scope);
+      }
+  
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData
-      });
-
+      const response = await fetch(
+        `http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        }
+      );
+  
       if (!response.ok) {
         throw new Error('Failed to upload files');
       }
-
+  
       const result = await response.json();
+  
       if (result.message === "Verification completed") {
+        // **刷新驗證列表**
         window.dispatchEvent(new CustomEvent('refreshVerifications'));
-        
+  
+        // **強制重新獲取驗證詳細資料**
         const detailsResponse = await fetch(
           `http://162.38.2.150:8100/verifications/${selectedVerification.id}`,
           {
             headers: { 'Authorization': `Bearer ${token}` }
           }
         );
-
+  
         if (!detailsResponse.ok) {
           throw new Error('Failed to fetch verification details');
         }
-
+  
         const details = await detailsResponse.json();
-        setSelectedVerification(prev => ({ ...prev, status: details.status }));
-        window.dispatchEvent(new CustomEvent('refreshVerificationDetails', {
-          detail: { verificationId: selectedVerification.id }
-        }));
+  
+        // **更新選中的驗證**
+        setSelectedVerification({
+          ...selectedVerification,
+          status: details.status,  // 確保UI狀態更新
+          details,  // 把新比對結果存入
+        });
+  
       } else if (result.system_component === "docx_processing") {
         setErrorMessage(`文件缺少必要欄位：${result.missing_elements.join(', ')}`);
       }
+  
     } catch (error) {
       console.error('Verification error:', error);
       setErrorMessage('驗證過程發生錯誤，請稍後再試');
@@ -135,6 +149,8 @@ export default function ChatInterface() {
       setLoading(false);
     }
   };
+  
+  
   // Render PDF page when document or page changes
   useEffect(() => {
     if (pdfDocument && currentPage) {
@@ -175,6 +191,7 @@ export default function ChatInterface() {
       clearAllFiles();
     };
   }, []);
+  
 
   // Main handlers
   const handleVerificationSelect = async (verification) => {
@@ -186,6 +203,7 @@ export default function ChatInterface() {
 
     // Update selected verification state
     setSelectedVerification(verification);
+    
     if (!verification) return;
 
     try {
@@ -215,7 +233,9 @@ export default function ChatInterface() {
       console.error('Error in handleVerificationSelect:', error);
       setErrorMessage('Failed to load verification data');
     }
+    
   };
+  
 
   const handleCreateVerification = async (name) => {
     try {
@@ -738,10 +758,10 @@ export default function ChatInterface() {
           </div>
 
           {/* Image and results area */}
-          <div className="h-full w-1/2 flex flex-col gap-4 overflow-hidden">
+          <div className="h-full w-1/2 flex flex-col gap-4 overflow-hidden  ">
             {/* Image upload area */}
             <div
-              className={`h-2/3 border-2 border-dashed rounded-lg overflow-hidden transition-colors
+              className={`h-full border-2 border-dashed rounded-lg overflow-hidden transition-colors 
                 ${!selectedVerification
                   ? 'opacity-50 cursor-not-allowed border-gray-600'
                   : isImageDragging
@@ -797,7 +817,7 @@ export default function ChatInterface() {
                 </label>
               ) : (
                 <div className="h-full flex flex-col">
-                  <div className="flex-1 overflow-hidden flex items-center justify-center bg-gray-900 relative">
+                  <div className="flex-1 overflow flex items-center p-10  justify-center bg-gray-900 relative">
                     {/* Help and clear buttons container */}
                     <div className="absolute top-2 right-2 z-10 flex gap-2">
                       <button
@@ -850,7 +870,7 @@ export default function ChatInterface() {
                         ref={imgRef}
                         alt="Crop"
                         src={imgSrc}
-                        className="max-h-full max-w-full p-10 object-contain"
+                        className="max-h-full max-w-full object-contain"
                         draggable={false}
                       />
                     </ReactCrop>
