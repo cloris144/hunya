@@ -96,6 +96,7 @@ export default function ChatInterface() {
         const scope = serializeCropScope(selectedFiles.image.scope);
         formData.append('ocr_scope', scope);
       }
+      
   
       const token = localStorage.getItem('access_token');
       const response = await fetch(
@@ -114,31 +115,34 @@ export default function ChatInterface() {
       const result = await response.json();
   
       if (result.message === "Verification completed") {
-        // **刷新驗證列表**
+        // 触发全局事件，刷新验证列表
         window.dispatchEvent(new CustomEvent('refreshVerifications'));
-  
-        // **強制重新獲取驗證詳細資料**
+      
+        // 重新获取最新的比对结果
         const detailsResponse = await fetch(
           `http://162.38.2.150:8100/verifications/${selectedVerification.id}`,
           {
             headers: { 'Authorization': `Bearer ${token}` }
           }
         );
-  
+      
         if (!detailsResponse.ok) {
           throw new Error('Failed to fetch verification details');
         }
-  
+      
         const details = await detailsResponse.json();
-  
-        // **更新選中的驗證**
-        setSelectedVerification({
-          ...selectedVerification,
-          status: details.status,  // 確保UI狀態更新
-          details,  // 把新比對結果存入
-        });
-  
-      } else if (result.system_component === "docx_processing") {
+      
+        // **强制更新 UI，确保 VerificationDetails 重新渲染**
+        setSelectedVerification(null); // 先清空
+        setTimeout(() => {
+          setSelectedVerification({
+            ...selectedVerification,
+            status: details.status,
+            details, // 确保比对结果存入
+          });
+        }, 100);
+      }
+       else if (result.system_component === "docx_processing") {
         setErrorMessage(`文件缺少必要欄位：${result.missing_elements.join(', ')}`);
       }
   
