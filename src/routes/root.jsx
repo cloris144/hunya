@@ -28,6 +28,9 @@ function centerInitialCrop(mediaWidth, mediaHeight) {
 }
 
 export default function ChatInterface() {
+
+  
+
   // File management
   const {
     selectedFiles,
@@ -82,22 +85,11 @@ export default function ChatInterface() {
 
     try {
       const formData = new FormData();
-      
-      // Add docx file if exists
       if (selectedFiles.docx) {
         formData.append('docx_file', selectedFiles.docx.file);
       }
-
-      // Add image file if exists
       if (selectedFiles.image) {
         formData.append('image_file', selectedFiles.image.file);
-      }
-
-      // Add OCR scope if exists
-      if (selectedFiles.image?.scope) {
-        const scope = serializeCropScope(selectedFiles.image.scope);
-        console.log(selectedFiles.image.scope)
-        formData.append('ocr_scope', scope);
       }
 
       const token = localStorage.getItem('access_token');
@@ -114,12 +106,9 @@ export default function ChatInterface() {
       }
 
       const result = await response.json();
-
       if (result.message === "Verification completed") {
-        // Refresh verifications list to update status
         window.dispatchEvent(new CustomEvent('refreshVerifications'));
         
-        // Fetch updated verification details
         const detailsResponse = await fetch(
           `http://162.38.2.150:8100/verifications/${selectedVerification.id}`,
           {
@@ -132,20 +121,13 @@ export default function ChatInterface() {
         }
 
         const details = await detailsResponse.json();
-        
-        // Update UI with new details
-        setSelectedVerification({
-          ...selectedVerification,
-          status: details.status
-        });
-
+        setSelectedVerification(prev => ({ ...prev, status: details.status }));
+        window.dispatchEvent(new CustomEvent('refreshVerificationDetails', {
+          detail: { verificationId: selectedVerification.id }
+        }));
       } else if (result.system_component === "docx_processing") {
-        // Handle error case
-        setErrorMessage(
-          `文件缺少必要欄位：${result.missing_elements.join(', ')}`
-        );
+        setErrorMessage(`文件缺少必要欄位：${result.missing_elements.join(', ')}`);
       }
-
     } catch (error) {
       console.error('Verification error:', error);
       setErrorMessage('驗證過程發生錯誤，請稍後再試');
@@ -639,7 +621,7 @@ export default function ChatInterface() {
                   : selectedFile || isPdfAvailable  // Modified condition
                     ? 'border-gray-600 cursor-default'  // Changed cursor when file is selected
                     : isDocDragging
-                      ? 'border-blue-500 bg-blue-500/10 cursor-pointer'
+                      ? 'border-write-500 bg-blue-500/10 cursor-pointer'
                       : 'border-gray-600 hover:border-gray-500 cursor-pointer'}`}
               onClick={() => {
                 // Modified click handler to prevent file selection when a file exists
@@ -868,7 +850,7 @@ export default function ChatInterface() {
                         ref={imgRef}
                         alt="Crop"
                         src={imgSrc}
-                        className="max-h-full max-w-full object-contain"
+                        className="max-h-full max-w-full p-10 object-contain"
                         draggable={false}
                       />
                     </ReactCrop>
