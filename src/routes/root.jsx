@@ -29,7 +29,7 @@ function centerInitialCrop(mediaWidth, mediaHeight) {
 
 export default function ChatInterface() {
 
-  
+
 
   // File management
   const {
@@ -79,13 +79,13 @@ export default function ChatInterface() {
       setErrorMessage("請確保已上傳文件和影像！");
       return;
     }
-  
+
     setLoading(true);
     setErrorMessage("");
-  
+
     try {
       const formData = new FormData();
-  
+
       if (selectedFiles.docx) {
         formData.append('docx_file', selectedFiles.docx.file);
       }
@@ -96,8 +96,8 @@ export default function ChatInterface() {
         const scope = serializeCropScope(selectedFiles.image.scope);
         formData.append('ocr_scope', scope);
       }
-      
-  
+
+
       const token = localStorage.getItem('access_token');
       const response = await fetch(
         `http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`,
@@ -107,17 +107,17 @@ export default function ChatInterface() {
           body: formData
         }
       );
-  
+
       if (!response.ok) {
         throw new Error('Failed to upload files');
       }
-  
+
       const result = await response.json();
-  
+
       if (result.message === "Verification completed") {
         // 触发全局事件，刷新验证列表
         window.dispatchEvent(new CustomEvent('refreshVerifications'));
-      
+
         // 重新获取最新的比对结果
         const detailsResponse = await fetch(
           `http://162.38.2.150:8100/verifications/${selectedVerification.id}`,
@@ -125,13 +125,13 @@ export default function ChatInterface() {
             headers: { 'Authorization': `Bearer ${token}` }
           }
         );
-      
+
         if (!detailsResponse.ok) {
           throw new Error('Failed to fetch verification details');
         }
-      
+
         const details = await detailsResponse.json();
-      
+
         // **强制更新 UI，确保 VerificationDetails 重新渲染**
         setSelectedVerification(null); // 先清空
         setTimeout(() => {
@@ -142,10 +142,14 @@ export default function ChatInterface() {
           });
         }, 100);
       }
-       else if (result.system_component === "docx_processing") {
+      else if (result.system_component === "docx_processing") {
         setErrorMessage(`文件缺少必要欄位：${result.missing_elements.join(', ')}`);
       }
-  
+      else if (result.system_component === "image_processing") {
+        if (result.error_type === "NUTRITION_TABLE_MISSING") {
+          setErrorMessage(`無法偵測到營養標示表，請確保圖片清晰、並包含完整的營養標示內容。`);
+        }
+      }
     } catch (error) {
       console.error('Verification error:', error);
       setErrorMessage('驗證過程發生錯誤，請稍後再試');
@@ -153,8 +157,8 @@ export default function ChatInterface() {
       setLoading(false);
     }
   };
-  
-  
+
+
   // Render PDF page when document or page changes
   useEffect(() => {
     if (pdfDocument && currentPage) {
@@ -195,7 +199,7 @@ export default function ChatInterface() {
       clearAllFiles();
     };
   }, []);
-  
+
 
   // Main handlers
   const handleVerificationSelect = async (verification) => {
@@ -207,7 +211,7 @@ export default function ChatInterface() {
 
     // Update selected verification state
     setSelectedVerification(verification);
-    
+
     if (!verification) return;
 
     try {
@@ -237,9 +241,9 @@ export default function ChatInterface() {
       console.error('Error in handleVerificationSelect:', error);
       setErrorMessage('Failed to load verification data');
     }
-    
+
   };
-  
+
 
   const handleCreateVerification = async (name) => {
     try {
@@ -571,7 +575,7 @@ export default function ChatInterface() {
 
   const serializeCropScope = (cropData) => {
     if (!cropData) return null;
-    
+
     // Extract values, ensuring they exist and are numbers
     const x = parseFloat(cropData.cropX) || 0;
     const y = parseFloat(cropData.cropY) || 0;
@@ -903,30 +907,29 @@ export default function ChatInterface() {
 
         {/* Footer */}
         <div className="p-4 bg-gray-800 border-t border-gray-700">
-      <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
-        <button
-          onClick={handleVerification}
-          disabled={!selectedVerification || loading}
-          className={`px-12 py-2 rounded-lg text-white transition-colors ${
-            !selectedVerification || loading
-              ? 'bg-gray-600 cursor-not-allowed opacity-50'
-              : 'bg-blue-800 hover:bg-blue-500'
-          }`}
-        >
-          {loading ? (
-            <div className="flex items-center gap-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-              處理中...
-            </div>
-          ) : (
-            '驗證'
-          )}
-        </button>
-        {errorMessage && (
-          <div className="text-red-500 text-sm whitespace-pre-line">{errorMessage}</div>
-        )}
-      </div>
-    </div>
+          <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
+            <button
+              onClick={handleVerification}
+              disabled={!selectedVerification || loading}
+              className={`px-12 py-2 rounded-lg text-white transition-colors ${!selectedVerification || loading
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                  : 'bg-blue-800 hover:bg-blue-500'
+                }`}
+            >
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                  處理中...
+                </div>
+              ) : (
+                '驗證'
+              )}
+            </button>
+            {errorMessage && (
+              <div className="text-red-500 text-sm whitespace-pre-line">{errorMessage}</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
