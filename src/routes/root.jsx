@@ -17,10 +17,10 @@ function centerInitialCrop(mediaWidth, mediaHeight) {
   return centerCrop(
     {
       unit: '%',
-      width: 30,
-      height: 30,
-      x: 35,
-      y: 35
+      width: 100,
+      height: 100,
+      x: 0,
+      y: 0
     },
     mediaWidth,
     mediaHeight
@@ -60,6 +60,7 @@ export default function ChatInterface() {
   const [errorMessage, setErrorMessage] = useState("");
   const [showHelp, setShowHelp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loading_button, setLoading_button] = useState(false);
   const [isDocDragging, setIsDocDragging] = useState(false);
   const [isImageDragging, setIsImageDragging] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
@@ -70,6 +71,30 @@ export default function ChatInterface() {
   const [completedCrop, setCompletedCrop] = useState(null);
   const [selectedVerification, setSelectedVerification] = useState(null);
   const [savedOcrScope, setSavedOcrScope] = useState(null);
+  const fetchWithAuth = async (url, options = {}) => {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    // Ensure Authorization header is included
+    options.headers = {
+      ...options.headers,
+      Authorization: `Bearer ${token}`,
+    };
+
+    const response = await fetch(url, options);
+
+    if (response.status === 401) {
+      localStorage.removeItem("access_token"); // Clear invalid token
+      navigate("/login"); // Redirect to login page
+      return null;
+    }
+
+    return response;
+  };
+
   const handleVerification = async () => {
     if (!selectedVerification) {
       setErrorMessage("請先選擇一個驗證！");
@@ -80,83 +105,82 @@ export default function ChatInterface() {
       return;
     }
 
-    setLoading(true);
+    setLoading_button(true);
     setErrorMessage("");
 
     try {
       const formData = new FormData();
 
       if (selectedFiles.docx) {
-        formData.append('docx_file', selectedFiles.docx.file);
+        formData.append("docx_file", selectedFiles.docx.file);
       }
       if (selectedFiles.image) {
-        formData.append('image_file', selectedFiles.image.file);
+        formData.append("image_file", selectedFiles.image.file);
       }
       if (selectedFiles.image?.scope) {
         const scope = serializeCropScope(selectedFiles.image.scope);
-        formData.append('ocr_scope', scope);
+        formData.append("ocr_scope", scope);
       }
 
-
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`,
         {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
-          body: formData
+          method: "POST",
+          body: formData,
         }
       );
 
+      if (!response) return; // 401 handled inside fetchWithAuth
+
       if (!response.ok) {
-        throw new Error('Failed to upload files');
+        throw new Error("Failed to upload files");
       }
 
       const result = await response.json();
 
       if (result.message === "Verification completed") {
-        // 触发全局事件，刷新验证列表
-        window.dispatchEvent(new CustomEvent('refreshVerifications'));
+        // Trigger a global event to refresh the verification list
+        window.dispatchEvent(new CustomEvent("refreshVerifications"));
 
-        // 重新获取最新的比对结果
-        const detailsResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${selectedVerification.id}`,
-          {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }
+        // Fetch the latest verification details
+        const detailsResponse = await fetchWithAuth(
+          `http://162.38.2.150:8100/verifications/${selectedVerification.id}`
         );
 
+        if (!detailsResponse) return; // 401 handled inside fetchWithAuth
+
         if (!detailsResponse.ok) {
-          throw new Error('Failed to fetch verification details');
+          throw new Error("Failed to fetch verification details");
         }
 
         const details = await detailsResponse.json();
 
-        // **强制更新 UI，确保 VerificationDetails 重新渲染**
-        setSelectedVerification(null); // 先清空
+        // Force UI update to ensure VerificationDetails re-renders
+        setSelectedVerification(null);
         setTimeout(() => {
           setSelectedVerification({
             ...selectedVerification,
             status: details.status,
-            details, // 确保比对结果存入
+            details, // Ensure verification results are updated
           });
         }, 100);
-      }
-      else if (result.system_component === "docx_processing") {
-        setErrorMessage(`文件缺少必要欄位：${result.missing_elements.join(', ')}`);
-      }
-      else if (result.system_component === "image_processing") {
+      } else if (result.system_component === "docx_processing") {
+        setErrorMessage(`文件缺少必要欄位：${result.missing_elements.join(", ")}`);
+      } else if (result.system_component === "image_processing") {
         if (result.error_type === "NUTRITION_TABLE_MISSING") {
-          setErrorMessage(`無法偵測到營養標示表，請確保圖片清晰、並包含完整的營養標示內容。`);
+          setErrorMessage(
+            `無法偵測到營養標示表，請確保圖片清晰、光線充足，並包含完整的營養標示內容。`
+          );
         }
       }
     } catch (error) {
-      console.error('Verification error:', error);
-      setErrorMessage('驗證過程發生錯誤，請稍後再試');
+      console.error("Verification error:", error);
+      setErrorMessage("驗證過程發生錯誤，請稍後再試");
     } finally {
-      setLoading(false);
+      setLoading_button(false);
     }
   };
+
 
 
   // Render PDF page when document or page changes
@@ -176,15 +200,13 @@ export default function ChatInterface() {
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const token = localStorage.getItem('access_token');
-        const response = await fetch('http://162.38.2.150:8100/users/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!response.ok) throw new Error('Failed to fetch user data');
+        const response = await fetchWithAuth("http://162.38.2.150:8100/users/me");
+        if (!response) return; // Already handled 401 redirection
+
         const userData = await response.json();
         setUsername(userData.username);
       } catch (error) {
-        console.error('Error fetching user data:', error);
+        console.error("Error fetching user data:", error);
         setUsername("Error");
       }
     };
@@ -220,7 +242,7 @@ export default function ChatInterface() {
       if (!token) throw new Error('No authentication token found');
 
       // Fetch verification details
-      const response = await fetch(`http://162.38.2.150:8100/verifications/${verification.id}`, {
+      const response = await fetchWithAuth(`http://162.38.2.150:8100/verifications/${verification.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -238,12 +260,10 @@ export default function ChatInterface() {
       }
 
     } catch (error) {
-      console.error('Error in handleVerificationSelect:', error);
-      setErrorMessage('Failed to load verification data');
+      console.error("Error fetching verification details:", error);
+      setErrorMessage("Failed to load verification data");
     }
-
   };
-
 
   const handleCreateVerification = async (name) => {
     try {
@@ -910,13 +930,13 @@ export default function ChatInterface() {
           <div className="max-w-7xl mx-auto flex flex-col items-center gap-2">
             <button
               onClick={handleVerification}
-              disabled={!selectedVerification || loading}
-              className={`px-12 py-2 rounded-lg text-white transition-colors ${!selectedVerification || loading
-                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                  : 'bg-blue-800 hover:bg-blue-500'
+              disabled={!selectedVerification || loading || loading_button}
+              className={`px-12 py-2 rounded-lg text-white transition-colors ${!selectedVerification || loading || loading_button
+                ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                : 'bg-blue-800 hover:bg-blue-500'
                 }`}
             >
-              {loading ? (
+              {loading_button ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
                   處理中...

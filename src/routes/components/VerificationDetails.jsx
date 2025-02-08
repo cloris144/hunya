@@ -1,10 +1,14 @@
 import React, { useEffect, useState, memo } from 'react';
 import { AlertCircle, FileText, Image, Download } from 'lucide-react';
+import { diffWords } from 'diff';
 
-const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoaded }) => {
+const VerificationDetails = memo(({ verificationId, onDetailsLoaded }) => {
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const normalizeText = (text) => {
+    return text.replace(/\s+/g, '').replace(/[。.]$/, '');
+  };
 
   const handleDownload = async (fileType) => {
     try {
@@ -22,12 +26,9 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
         throw new Error(`Failed to download ${fileType}`);
       }
 
-      let filename = '';
-      if (fileType === 'docx') {
-        filename = details.docx_info?.filename || `verification-${verificationId}.docx`;
-      } else if (fileType === 'image') {
-        filename = details.image_info?.filename || `verification-${verificationId}.png`;
-      }
+      let filename = fileType === 'docx'
+        ? details.docx_info?.filename || `verification-${verificationId}.docx`
+        : details.image_info?.filename || `verification-${verificationId}.png`;
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
@@ -60,14 +61,13 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
             'Authorization': `Bearer ${token}`
           }
         });
-    
+
         if (!response.ok) {
           throw new Error('Failed to fetch verification details');
         }
-    
+
         const data = await response.json();
         setDetails(data);
-        
         if (onDetailsLoaded) {
           onDetailsLoaded(data);
         }
@@ -106,6 +106,34 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
     return null;
   }
 
+  // Function to highlight OCR differences
+  const getHighlightedText = (docText, ocrText) => {
+    const normalizedDocText = normalizeText(docText || '');
+    const normalizedOcrText = normalizeText(ocrText || '');
+  
+    const diff = diffWords(normalizedOcrText, normalizedDocText);
+  
+    return diff.map((part, index) => {
+      if (part.added) {
+        // Added text (should be green)
+        return (
+          <span key={index} className="bg-green-500/30 text-green-400 px-1 rounded">
+            {part.value}
+          </span>
+        );
+      } else if (part.removed) {
+        // Removed text (should be red with strikethrough)
+        return (
+          <span key={index} className="bg-red-500/30 text-red-400 px-1 rounded line-through">
+            {part.value}
+          </span>
+        );
+      }
+      return <span key={index}>{part.value}</span>;
+    });
+  };
+  
+
   return (
     <div className="p-4 space-y-4">
       <div className="flex justify-between items-start">
@@ -113,18 +141,17 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
           <h2 className="text-xl font-semibold">{details.verification_name}</h2>
           <p className="text-gray-400">Created: {new Date(details.created_at).toLocaleString()}</p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-sm ${
-          details.status === 'completed' 
-            ? 'bg-green-500/20 text-green-400' 
-            : 'bg-yellow-500/20 text-yellow-400'
-        }`}>
+        <span className={`px-3 py-1 rounded-full text-sm ${details.status === 'completed'
+          ? 'bg-green-500/20 text-green-400'
+          : 'bg-yellow-500/20 text-yellow-400'
+          }`}>
           {details.status}
         </span>
       </div>
 
       {/* File Status Section with Download Buttons */}
       <div className="space-y-3">
-        {details.docx_info && details.docx_info.exists && (
+        {details.docx_info?.exists && (
           <div className="flex items-start gap-2 p-2 bg-gray-800/50 rounded-lg">
             <FileText className="w-4 h-4 mt-1 flex-shrink-0" />
             <div className="flex-1 min-w-0">
@@ -135,13 +162,12 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
             <button
               onClick={() => handleDownload('docx')}
               className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
-              title={`Download ${details.docx_info.filename || 'document'}`}
             >
               <Download className="w-4 h-4 text-blue-400" />
             </button>
           </div>
         )}
-        {details.image_info && details.image_info.exists && (
+        {details.image_info?.exists && (
           <div className="flex items-start gap-2 p-2 bg-gray-800/50 rounded-lg">
             <Image className="w-4 h-4 mt-1 flex-shrink-0" />
             <div className="flex-1 min-w-0">
@@ -152,7 +178,6 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
             <button
               onClick={() => handleDownload('image')}
               className="ml-2 p-1 hover:bg-gray-700 rounded-full transition-colors flex-shrink-0"
-              title={`Download ${details.image_info.filename || 'image'}`}
             >
               <Download className="w-4 h-4 text-blue-400" />
             </button>
@@ -164,7 +189,6 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
       {details.differences?.compare_result && (
         <div className="mt-4 border border-gray-700 rounded-lg p-4">
           <h3 className="text-lg font-medium mb-3">Differences Found</h3>
-          
           {details.differences.compare_result.invalid_titles?.length > 0 && (
             <div className="mb-4">
               <h4 className="text-red-400 font-medium mb-2">Invalid Titles</h4>
@@ -175,7 +199,6 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
               </ul>
             </div>
           )}
-
           {Object.entries(details.differences.compare_result.differences).length > 0 && (
             <div>
               <h4 className="text-yellow-400 font-medium mb-2">Content Differences</h4>
@@ -190,7 +213,7 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded, onFilesLoad
                       </div>
                       <div>
                         <p className="text-xs text-gray-500">OCR Result</p>
-                        <p className="text-white">{diff.ocr}</p>
+                        <p className="text-white">{getHighlightedText(diff.docx, diff.ocr)}</p>
                       </div>
                     </div>
                   </div>
