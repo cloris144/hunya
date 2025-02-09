@@ -139,7 +139,7 @@ const useFileManager = () => {
   const loadExistingFiles = async (verificationId) => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://162.38.2.150:8100/verifications/${verificationId}`, {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -155,7 +155,7 @@ const useFileManager = () => {
       // Load DOCX if exists
       if (data.docx_info?.exists) {
         const docxResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/docx`,
+          `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/docx`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
         if (docxResponse.ok) {
@@ -170,7 +170,7 @@ const useFileManager = () => {
       // Load PDF if exists
       if (data.pdf_info?.exists) {
         const pdfResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/pdf`,
+          `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/pdf`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
         if (pdfResponse.ok) {
@@ -185,7 +185,7 @@ const useFileManager = () => {
       // Load image if exists
       if (data.image_info?.exists) {
         const imageResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/image`,
+          `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/image`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
         if (imageResponse.ok) {

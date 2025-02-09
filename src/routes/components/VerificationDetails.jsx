@@ -14,7 +14,7 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded }) => {
     try {
       const token = localStorage.getItem('access_token');
       const response = await fetch(
-        `http://162.38.2.150:8100/verifications/${verificationId}/${fileType}`,
+        `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/${fileType}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -56,7 +56,7 @@ const VerificationDetails = memo(({ verificationId, onDetailsLoaded }) => {
       setError(null);
       try {
         const token = localStorage.getItem('access_token');
-        const response = await fetch(`http://162.38.2.150:8100/verifications/${verificationId}`, {
+        const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }

@@ -37,7 +37,7 @@ function Login() {
     setIsLoading(true)
     setError("")
     try {
-      const response = await fetch("http://162.38.3.101:8100/token", {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/token`, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",

@@ -123,7 +123,7 @@ export default function ChatInterface() {
       }
 
       const response = await fetchWithAuth(
-        `http://162.38.2.150:8100/verifications/${selectedVerification.id}/upload`,
+        `${process.env.REACT_APP_BACKEND_URL}/verifications/${selectedVerification.id}/upload`,
         {
           method: "POST",
           body: formData,
@@ -144,7 +144,7 @@ export default function ChatInterface() {
 
         // Fetch the latest verification details
         const detailsResponse = await fetchWithAuth(
-          `http://162.38.2.150:8100/verifications/${selectedVerification.id}`
+          `${process.env.REACT_APP_BACKEND_URL}/verifications/${selectedVerification.id}`
         );
 
         if (!detailsResponse) return; // 401 handled inside fetchWithAuth
@@ -200,7 +200,7 @@ export default function ChatInterface() {
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const response = await fetchWithAuth("http://162.38.2.150:8100/users/me");
+        const response = await fetchWithAuth(`${process.env.REACT_APP_BACKEND_URL}/users/me`);
         if (!response) return; // Already handled 401 redirection
 
         const userData = await response.json();
@@ -242,7 +242,7 @@ export default function ChatInterface() {
       if (!token) throw new Error('No authentication token found');
 
       // Fetch verification details
-      const response = await fetchWithAuth(`http://162.38.2.150:8100/verifications/${verification.id}`, {
+      const response = await fetchWithAuth(`${process.env.REACT_APP_BACKEND_URL}/verifications/${verification.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -268,7 +268,7 @@ export default function ChatInterface() {
   const handleCreateVerification = async (name) => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch('http://162.38.2.150:8100/verifications?verification_name=' + encodeURIComponent(name), {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/verifications?verification_name=` + encodeURIComponent(name), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -304,7 +304,7 @@ export default function ChatInterface() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://162.38.3.101:8101/doc_to_pdf', {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/doc_to_pdf`, {
         method: 'POST',
         body: formData,
       });
@@ -465,7 +465,7 @@ export default function ChatInterface() {
       if (data.docx_info?.exists) {
         console.log('exdocx')
         const docxResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/docx`,
+          `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/docx`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
 
@@ -490,7 +490,7 @@ export default function ChatInterface() {
       // Handle existing PDF if available
       if (data.pdf_info?.exists && data.pdf_info?.available) {
         const pdfResponse = await fetch(
-          `http://162.38.2.150:8100/verifications/${verificationId}/pdf`,
+          `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/pdf`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
 
@@ -520,7 +520,7 @@ export default function ChatInterface() {
   const loadImageFile = async (verificationId, imageInfo, token) => {
     try {
       const response = await fetch(
-        `http://162.38.2.150:8100/verifications/${verificationId}/image`,
+        `${process.env.REACT_APP_BACKEND_URL}/verifications/${verificationId}/image`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 

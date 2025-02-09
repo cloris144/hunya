@@ -65,7 +65,7 @@ const VerificationList = ({ onVerificationSelect }) => {
         return;
       }
   
-      const response = await fetch('http://162.38.2.150:8100/verifications', {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/verifications`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -126,7 +126,7 @@ const VerificationList = ({ onVerificationSelect }) => {
     e.stopPropagation();
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://162.38.2.150:8100/verifications/${id}`, {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/verifications/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -169,7 +169,7 @@ const VerificationList = ({ onVerificationSelect }) => {
     e.preventDefault();
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://162.38.2.150:8100/verifications/${renamingId}/rename`, {
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/verifications/${renamingId}/rename`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
