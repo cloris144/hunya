@@ -1,41 +1,102 @@
-# hunya
-hunya-ocr-frontend
-# hunya
-hunya-ocr-frontend
+# HunyProof Frontend
 
-# 食品成分表檢查系統前端
+This is the frontend of the HunyProof application, built using React. It includes authentication, file verification, and protected routes. The project is containerized using Docker for easy deployment.
 
-## 項目簡介
-本專案是食品公司用於判斷成分表是否出錯的系統前端，主要負責上傳影像並進行結果輸出。
+## Table of Contents
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Environment Variables](#environment-variables)
+- [Usage](#usage)
+- [Docker Setup](#docker-setup)
+- [File Structure](#file-structure)
+- [Contributing](#contributing)
+- [License](#license)
 
-## 目前進度
-- **第一版主頁** 已經搭建完成，包含：
-  - 左側導航欄
-  - 上傳影像區塊
-  - 結果顯示區塊
-  - 輸出按鈕
+## Requirements
 
-## 技術棧
-- **前端框架**：React
-- **UI 框架**：Tailwind CSS
-- **圖示庫**：Lucide React
+- Node.js (>=14.0.0)
+- npm or yarn
+- Docker & Docker Compose
 
-## 使用方法
-1. **安裝依賴**：
-   ```bash
+## Installation
+
+1. Clone the repository:
+   ```sh
+   git clone https://github.com/your-repo/hunyproof-frontend.git
+   cd hunyproof-frontend
+   ```
+
+2. Install dependencies:
+   ```sh
    npm install
+   # or
+   yarn install
    ```
-2. **運行專案**：
-   ```bash
-   npm start
+
+## Environment Variables
+
+Create a `.env` file in the root directory and set the following environment variables:
+
+```
+REACT_APP_BACKEND_URL=http://127.0.0.1:8100
+```
+
+## Usage
+
+To start the application in development mode:
+```sh
+npm start
+```
+
+The application will be available at `http://localhost:3000`.
+
+## Docker Setup
+
+To run the application using Docker:
+
+1. Build the Docker image:
+   ```sh
+   docker build -t hunyproof-frontend .
    ```
-3. 在主頁上傳影像，系統會處理並顯示結果。
 
-## 未來規劃
-- **影像分析與錯誤檢測功能**
-- **後端 API 連接**
-- **使用者權限管理**
+2. Run the container:
+   ```sh
+   docker run -p 3000:3000 --name hunyproof-frontend -d hunyproof-frontend
+   ```
 
-## 聯絡方式
-如有問題，請聯絡開發者或提交 Issue。
+Alternatively, you can use Docker Compose:
+```sh
+docker-compose up --build
+```
+
+## File Structure
+
+```
+├── src
+│   ├── components
+│   │   ├── UserMenu.jsx
+│   │   ├── VerificationList.jsx
+│   │   ├── VerificationDetails.jsx
+│   │   ├── RenameDialog.jsx
+│   ├── hooks
+│   │   ├── useFileManager.jsx
+│   ├── pages
+│   │   ├── Login.jsx
+│   ├── routes
+│   │   ├── ProtectedRoute.jsx
+│   ├── App.jsx
+│   ├── index.jsx
+├── Dockerfile
+├── docker-compose.yml
+├── package.json
+└── README.md
+```
+
+## Contributing
+
+Pull requests are welcome! Please follow the coding standards and ensure all changes are tested before submitting.
+
+## License
+
+This project is licensed under the MIT License.
 
