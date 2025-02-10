@@ -409,8 +409,6 @@ export default function ChatInterface() {
       img.onload = () => {
         const initialCrop = centerInitialCrop(img.width, img.height);
         setCrop(initialCrop);
-        setCompletedCrop(null);
-
         updateImageScope({
           x: initialCrop.x,
           y: initialCrop.y,
@@ -813,13 +811,32 @@ export default function ChatInterface() {
                 e.preventDefault();
                 e.stopPropagation();
                 setIsImageDragging(false);
-
+              
                 const file = e.dataTransfer.files[0];
                 if (!file || !file.type.startsWith('image/')) return;
-
+              
+                // Update the file manager with the dropped file.
+                updateImageFile(file, file.name);
+              
                 const reader = new FileReader();
                 reader.addEventListener('load', () => {
-                  setImgSrc(reader.result?.toString() || '');
+                  const imageUrl = reader.result?.toString() || '';
+                  setImgSrc(imageUrl);
+              
+                  // Create an image to calculate the default crop.
+                  const img = new Image();
+                  img.src = imageUrl;
+                  img.onload = () => {
+                    const initialCrop = centerInitialCrop(img.width, img.height);
+                    setCrop(initialCrop);
+                    // Update the OCR scope so that it becomes [100.00, 100.00, 0.00, 0.00]
+                    updateImageScope({
+                      x: initialCrop.x,
+                      y: initialCrop.y,
+                      width: initialCrop.width,
+                      height: initialCrop.height
+                    });
+                  };
                 });
                 reader.readAsDataURL(file);
               }}
